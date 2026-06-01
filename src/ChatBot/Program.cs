@@ -33,23 +33,29 @@ while (true)
 
     history.Add(new MessageParam { Role = Role.User, Content = input.Trim() });
 
-    Message response = await client.Messages.Create(new MessageCreateParams
+    var parameters = new MessageCreateParams
     {
         Model = Model.ClaudeOpus4_8,
         MaxTokens = 4096,
         System = systemPrompt,
         Messages = history,
-    });
+    };
 
-    string reply = string.Concat(
-        response.Content
-                .Select(b => b.Value)
-                .OfType<TextBlock>()
-                .Select(t => t.Text));
+    Console.Write("\nClaude: ");
 
-    history.Add(new MessageParam { Role = Role.Assistant, Content = reply });
+    var reply = new System.Text.StringBuilder();
+    await foreach (RawMessageStreamEvent streamEvent in client.Messages.CreateStreaming(parameters))
+    {
+        if (streamEvent.TryPickContentBlockDelta(out var delta) &&
+            delta.Delta.TryPickText(out var text))
+        {
+            Console.Write(text.Text);
+            reply.Append(text.Text);
+        }
+    }
+    Console.WriteLine();
 
-    Console.WriteLine($"\nClaude: {reply}");
+    history.Add(new MessageParam { Role = Role.Assistant, Content = reply.ToString() });
 }
 
 Console.WriteLine("\nGoodbye!");
