@@ -1,5 +1,6 @@
 using Anthropic;
 using Anthropic.Models.Messages;
+using ChatBot;
 
 string? apiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
 if (string.IsNullOrWhiteSpace(apiKey))
@@ -13,9 +14,31 @@ AnthropicClient client = new() { ApiKey = apiKey };
 const string defaultSystemPrompt = "You are a helpful, concise assistant.";
 string systemPrompt = ResolveSystemPrompt(defaultSystemPrompt);
 
-var history = new List<MessageParam>();
+string historyPath = Environment.GetEnvironmentVariable("ANTHROPIC_HISTORY_FILE")
+                     ?? ConversationStore.DefaultPath;
 
-Console.WriteLine("Claude Chatbot — type 'exit' or 'quit' to stop.");
+// `turns` is the persistence source of truth; `history` is the SDK view sent on each request.
+var turns = new List<StoredTurn>();
+
+if (ConversationStore.Exists(historyPath))
+{
+    Console.Write($"Found a saved conversation at {historyPath}. Resume it? [Y/n] ");
+    string? answer = Console.ReadLine();
+    if (answer is null || !answer.Trim().Equals("n", StringComparison.OrdinalIgnoreCase))
+    {
+        turns = ConversationStore.Load(historyPath);
+        Console.WriteLine($"Resumed {turns.Count} turn(s).");
+    }
+    else
+    {
+        ConversationStore.Clear(historyPath);
+        Console.WriteLine("Started a fresh conversation.");
+    }
+}
+
+var history = turns.Select(t => t.ToMessage()).ToList();
+
+Console.WriteLine("Claude Chatbot — type 'exit'/'quit' to stop, 'clear' to wipe saved history.");
 Console.WriteLine($"Persona: {systemPrompt}");
 Console.WriteLine(new string('-', 50));
 
@@ -31,7 +54,18 @@ while (true)
     if (string.IsNullOrWhiteSpace(input))
         continue;
 
-    history.Add(new MessageParam { Role = Role.User, Content = input.Trim() });
+    if (input.Trim().Equals("clear", StringComparison.OrdinalIgnoreCase))
+    {
+        ConversationStore.Clear(historyPath);
+        history.Clear();
+        turns.Clear();
+        Console.WriteLine("Conversation history cleared.");
+        continue;
+    }
+
+    string userText = input.Trim();
+    history.Add(new MessageParam { Role = Role.User, Content = userText });
+    turns.Add(new StoredTurn("user", userText));
 
     var parameters = new MessageCreateParams
     {
@@ -56,6 +90,9 @@ while (true)
     Console.WriteLine();
 
     history.Add(new MessageParam { Role = Role.Assistant, Content = reply.ToString() });
+    turns.Add(new StoredTurn("assistant", reply.ToString()));
+
+    ConversationStore.Save(historyPath, turns);
 }
 
 Console.WriteLine("\nGoodbye!");
