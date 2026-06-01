@@ -10,9 +10,13 @@ if (string.IsNullOrWhiteSpace(apiKey))
 
 AnthropicClient client = new() { ApiKey = apiKey };
 
+const string defaultSystemPrompt = "You are a helpful, concise assistant.";
+string systemPrompt = ResolveSystemPrompt(defaultSystemPrompt);
+
 var history = new List<MessageParam>();
 
 Console.WriteLine("Claude Chatbot — type 'exit' or 'quit' to stop.");
+Console.WriteLine($"Persona: {systemPrompt}");
 Console.WriteLine(new string('-', 50));
 
 while (true)
@@ -33,6 +37,7 @@ while (true)
     {
         Model = Model.ClaudeOpus4_8,
         MaxTokens = 4096,
+        System = systemPrompt,
         Messages = history,
     });
 
@@ -49,3 +54,24 @@ while (true)
 
 Console.WriteLine("\nGoodbye!");
 return 0;
+
+// Resolves the system prompt with the following precedence:
+//   1. ANTHROPIC_SYSTEM_PROMPT_FILE — path to a file holding the prompt
+//   2. ANTHROPIC_SYSTEM_PROMPT      — the prompt text directly
+//   3. the supplied default
+static string ResolveSystemPrompt(string fallback)
+{
+    string? file = Environment.GetEnvironmentVariable("ANTHROPIC_SYSTEM_PROMPT_FILE");
+    if (!string.IsNullOrWhiteSpace(file) && File.Exists(file))
+    {
+        string fromFile = File.ReadAllText(file).Trim();
+        if (!string.IsNullOrWhiteSpace(fromFile))
+            return fromFile;
+    }
+
+    string? inline = Environment.GetEnvironmentVariable("ANTHROPIC_SYSTEM_PROMPT");
+    if (!string.IsNullOrWhiteSpace(inline))
+        return inline.Trim();
+
+    return fallback;
+}

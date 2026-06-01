@@ -1,0 +1,96 @@
+# Feature Implementation Plan
+
+This document plans three enhancements to the ChatBot console app:
+
+1. **Streaming responses** — print Claude's reply token-by-token as it arrives.
+2. **System prompt** — give the bot a configurable persona / instructions.
+3. **Persisting conversation history** — save and reload conversations across runs.
+
+Each feature is scoped so it can ship as an independent commit/PR.
+
+---
+
+## Current State
+
+`src/ChatBot/Program.cs` is a single-file top-level program that:
+- Reads `ANTHROPIC_API_KEY` from the environment.
+- Keeps an in-memory `List<MessageParam>` for multi-turn context.
+- Loops: read input → `client.Messages.Create(...)` (non-streaming) → print full reply.
+- Exits on `exit` / `quit`.
+
+Model: `claude-opus-4-8`.
+
+---
+
+## Feature 1: Streaming Responses
+
+**Goal:** Replace the blocking `Messages.Create` call with `Messages.CreateStreaming` so text appears incrementally, like a real chat UI.
+
+**Steps:**
+1. Swap `await client.Messages.Create(params)` for `client.Messages.CreateStreaming(params)`.
+2. Iterate the `RawMessageStreamEvent` async stream. On each event, use the `TryPickContentBlockDelta` → `delta.Delta.TryPickText` pattern to extract text deltas.
+3. `Console.Write` each delta with no newline; flush as it arrives.
+4. Accumulate the deltas into a `StringBuilder` so the full reply can still be appended to `history` for multi-turn context.
+5. Write a trailing newline once the stream completes.
+
+**Files:** `src/ChatBot/Program.cs`
+
+**Verification:** Run the app; confirm the reply renders progressively rather than all at once, and that a follow-up question still has context (history captured correctly).
+
+**Notes / risks:**
+- Must still build the complete assistant message from deltas — don't lose history.
+- Handle the case where a stream yields non-text blocks (ignore them for now).
+
+---
+
+## Feature 2: System Prompt
+
+**Goal:** Let the bot have a persona / standing instructions, configurable without recompiling.
+
+**Steps:**
+1. Add a `System` property to `MessageCreateParams`. Start with a sensible default string (e.g. "You are a helpful, concise assistant.").
+2. Make it overridable via an `ANTHROPIC_SYSTEM_PROMPT` environment variable, falling back to the default when unset.
+3. (Optional) Support loading the prompt from a file path given by `ANTHROPIC_SYSTEM_PROMPT_FILE` for longer prompts.
+4. Print the active persona at startup so the user knows the bot's mode.
+
+**Files:** `src/ChatBot/Program.cs`
+
+**Verification:** Set a distinctive system prompt (e.g. "Always answer in rhyming couplets") and confirm the bot's behavior changes.
+
+**Notes / risks:**
+- The system prompt is NOT part of the `messages` history — it's a top-level param sent on every request. Keep it stable for prompt caching benefits later.
+
+---
+
+## Feature 3: Persisting Conversation History
+
+**Goal:** Save the conversation to disk and optionally resume it on the next run.
+
+**Steps:**
+1. Choose a storage location — a JSON file under the user's app-data dir (e.g. `%APPDATA%/ClaudeIntro/history.json`) or a path-configurable location.
+2. Define a serializable record for a stored turn (`role` + `text`). Avoid serializing the SDK's `MessageParam` union directly — map to/from a simple DTO.
+3. On startup: if a history file exists, prompt the user to resume or start fresh. If resuming, deserialize and rebuild the `List<MessageParam>`.
+4. After each assistant reply (and on exit), serialize the current history to the file via `System.Text.Json`.
+5. Add a `clear` command to wipe the stored history.
+
+**Files:** `src/ChatBot/Program.cs` (plus possibly a small `ConversationStore.cs` helper).
+
+**Verification:** Have a multi-turn conversation, exit, restart, resume — confirm the bot remembers earlier turns. Test the `clear` command.
+
+**Notes / risks:**
+- Long histories grow the token cost of every request. A future enhancement could trim or summarize old turns (out of scope here).
+- Handle corrupt/missing files gracefully (start fresh rather than crash).
+
+---
+
+## Suggested Order
+
+1. **System prompt** — smallest, isolated change; good warm-up.
+2. **Streaming** — changes the core request loop.
+3. **Persistence** — builds on the stable history representation; largest surface area.
+
+## Out of Scope (future)
+
+- Context window management (trimming / compaction).
+- Prompt caching of the system prompt.
+- Configurable model / max tokens via flags or config file.
