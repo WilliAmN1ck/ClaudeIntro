@@ -10,15 +10,20 @@ Each feature is scoped so it can ship as an independent commit/PR.
 
 ---
 
-## Current State
+## Status
 
-`src/ChatBot/Program.cs` is a single-file top-level program that:
-- Reads `ANTHROPIC_API_KEY` from the environment.
-- Keeps an in-memory `List<MessageParam>` for multi-turn context.
-- Loops: read input → `client.Messages.Create(...)` (non-streaming) → print full reply.
-- Exits on `exit` / `quit`.
+All three original features below are **implemented**, plus the three follow-up
+items (configurable model/tokens, prompt caching, context-window management).
 
-Model: `claude-opus-4-8`.
+`src/ChatBot/Program.cs` + `src/ChatBot/ConversationStore.cs` now:
+- Read `ANTHROPIC_API_KEY` from the environment (exit with error if unset).
+- Apply a configurable system prompt, cached for prefix reuse.
+- Stream replies token-by-token.
+- Persist/resume conversation history as JSON, with a `clear` command.
+- Cap the messages sent per request (context-window management).
+- Read model and max-tokens from env vars.
+
+Default model: `claude-opus-4-8`.
 
 ---
 
@@ -89,8 +94,23 @@ Model: `claude-opus-4-8`.
 2. **Streaming** — changes the core request loop.
 3. **Persistence** — builds on the stable history representation; largest surface area.
 
+## Follow-up Features (implemented)
+
+### Configurable model / max tokens
+- `ANTHROPIC_MODEL` (default `claude-opus-4-8`) and `ANTHROPIC_MAX_TOKENS` (default 4096) env vars.
+- The `Model` param accepts the raw string directly (SDK implicit conversion).
+- Active config is printed in the startup banner.
+
+### Prompt caching
+- The system prompt is sent as a `List<TextBlockParam>` with `CacheControlEphemeral`, so its prefix is cached and reused across requests.
+- Caveat: a prefix only caches once it exceeds the model's minimum (~4096 tokens for Opus), so a short persona is a harmless no-op until the prompt grows.
+
+### Context-window management
+- `ANTHROPIC_MAX_HISTORY_MESSAGES` (default 40, `0` = unlimited) caps how many recent messages are sent per request.
+- Trimming preserves the API rule that the first message must be from the user (leading assistant messages are dropped).
+- Full history is still persisted to disk; only the per-request view is trimmed.
+
 ## Out of Scope (future)
 
-- Context window management (trimming / compaction).
-- Prompt caching of the system prompt.
-- Configurable model / max tokens via flags or config file.
+- Server-side compaction / summarization of old turns (vs. the simple count-based trim implemented here).
+- CLI flags / config file (currently env-var driven only).
