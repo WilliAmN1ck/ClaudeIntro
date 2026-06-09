@@ -61,9 +61,59 @@ if (ConversationStore.Exists(historyPath))
 
 var history = turns.Select(t => t.ToMessage()).ToList();
 
+// Compaction mode (beta) lets the API summarize old turns server-side instead of
+// the simple count-based trim. It is non-streaming and uses the beta endpoint.
+bool useCompaction = cli.ContainsKey("compaction")
+    || Environment.GetEnvironmentVariable("ANTHROPIC_COMPACTION") is "1"
+    || string.Equals(Environment.GetEnvironmentVariable("ANTHROPIC_COMPACTION"), "true", StringComparison.OrdinalIgnoreCase);
+
+// Each backend owns its own conversation history and prints its own reply text;
+// the outer loop just handles input, commands, and text persistence.
+Func<string, Task<string>> sendTurn;
+Action clearChat;
+
+if (useCompaction)
+{
+    var compactionChat = new CompactionChat(client, modelId, maxTokens, systemPrompt, turns);
+    sendTurn = compactionChat.SendAsync;
+    clearChat = compactionChat.Clear;
+}
+else
+{
+    sendTurn = async userText =>
+    {
+        history.Add(new MessageParam { Role = Role.User, Content = userText });
+        var parameters = new MessageCreateParams
+        {
+            Model = modelId,
+            MaxTokens = maxTokens,
+            System = systemBlocks,
+            Messages = TrimHistory(history, maxHistoryMessages),
+        };
+
+        var sb = new System.Text.StringBuilder();
+        await foreach (RawMessageStreamEvent streamEvent in client.Messages.CreateStreaming(parameters))
+        {
+            if (streamEvent.TryPickContentBlockDelta(out var delta) &&
+                delta.Delta.TryPickText(out var text))
+            {
+                Console.Write(text.Text);
+                sb.Append(text.Text);
+            }
+        }
+
+        string reply = sb.ToString();
+        history.Add(new MessageParam { Role = Role.Assistant, Content = reply });
+        return reply;
+    };
+    clearChat = () => history.Clear();
+}
+
 Console.WriteLine("Claude Chatbot — type 'exit'/'quit' to stop, 'clear' to wipe saved history.");
-Console.WriteLine($"Model: {modelId}  |  MaxTokens: {maxTokens}  |  History cap: " +
-                  (maxHistoryMessages > 0 ? $"{maxHistoryMessages} msgs" : "unlimited"));
+Console.WriteLine($"Model: {modelId}  |  MaxTokens: {maxTokens}  |  Context: " +
+                  (useCompaction
+                      ? "server-side compaction"
+                      : maxHistoryMessages > 0 ? $"last {maxHistoryMessages} msgs" : "unlimited"));
 Console.WriteLine($"Persona: {systemPrompt}");
 Console.WriteLine(new string('-', 50));
 
@@ -82,41 +132,20 @@ while (true)
     if (input.Trim().Equals("clear", StringComparison.OrdinalIgnoreCase))
     {
         ConversationStore.Clear(historyPath);
-        history.Clear();
+        clearChat();
         turns.Clear();
         Console.WriteLine("Conversation history cleared.");
         continue;
     }
 
     string userText = input.Trim();
-    history.Add(new MessageParam { Role = Role.User, Content = userText });
     turns.Add(new StoredTurn("user", userText));
 
-    var parameters = new MessageCreateParams
-    {
-        Model = modelId,
-        MaxTokens = maxTokens,
-        System = systemBlocks,
-        Messages = TrimHistory(history, maxHistoryMessages),
-    };
-
     Console.Write("\nClaude: ");
-
-    var reply = new System.Text.StringBuilder();
-    await foreach (RawMessageStreamEvent streamEvent in client.Messages.CreateStreaming(parameters))
-    {
-        if (streamEvent.TryPickContentBlockDelta(out var delta) &&
-            delta.Delta.TryPickText(out var text))
-        {
-            Console.Write(text.Text);
-            reply.Append(text.Text);
-        }
-    }
+    string reply = await sendTurn(userText);
     Console.WriteLine();
 
-    history.Add(new MessageParam { Role = Role.Assistant, Content = reply.ToString() });
-    turns.Add(new StoredTurn("assistant", reply.ToString()));
-
+    turns.Add(new StoredTurn("assistant", reply));
     ConversationStore.Save(historyPath, turns);
 }
 
@@ -212,6 +241,8 @@ static void PrintUsage()
           --system <text>        System prompt text  (env ANTHROPIC_SYSTEM_PROMPT)
           --system-file <path>   System prompt file  (env ANTHROPIC_SYSTEM_PROMPT_FILE)
           --history <path>       History file path   (env ANTHROPIC_HISTORY_FILE)
+          --compaction           Use server-side compaction instead of message-count trim
+                                 (beta; non-streaming; env ANTHROPIC_COMPACTION=1)
           -h, --help             Show this help and exit
 
         Requires the ANTHROPIC_API_KEY environment variable.

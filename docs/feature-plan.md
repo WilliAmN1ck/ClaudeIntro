@@ -110,7 +110,17 @@ Default model: `claude-opus-4-8`.
 - Trimming preserves the API rule that the first message must be from the user (leading assistant messages are dropped).
 - Full history is still persisted to disk; only the per-request view is trimmed.
 
+### CLI flags
+- `--model`, `--max-tokens`, `--max-history`, `--system`, `--system-file`, `--history`, `--compaction`, and `-h/--help`.
+- Precedence: CLI flag > env var > default. `--help` prints usage and exits before the API-key check.
+- Parsed by a small `ParseArgs` helper supporting `--key value`, `--key=value`, and bare `--flag`.
+
+### Server-side compaction (beta)
+- `--compaction` (or `ANTHROPIC_COMPACTION=1`) switches from the count-based trim to the API's `compact-2026-01-12` context management, which summarizes old turns server-side.
+- Implemented in `src/ChatBot/CompactionChat.cs` against `client.Beta.Messages`; it round-trips full response content (preserving compaction blocks) each turn.
+- This mode is non-streaming (the beta path used here returns a complete message); the default streaming mode is unchanged. Requires a compaction-capable model (Opus 4.6+/Sonnet 4.6).
+
 ## Out of Scope (future)
 
-- Server-side compaction / summarization of old turns (vs. the simple count-based trim implemented here).
-- CLI flags / config file (currently env-var driven only).
+- CLI streaming within compaction mode (would need beta streaming + compaction-block accumulation).
+- A config file (currently CLI-flag and env-var driven only).
