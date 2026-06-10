@@ -12,7 +12,7 @@ public class StreamingChatServiceTests
     private static AnthropicClient DummyClient() => new() { ApiKey = "sk-ant-dummy" };
 
     private static StreamingChatService NewService(ChatOptions options, IConversationStore store) =>
-        new(DummyClient(), options, "system", store, NullLogger<StreamingChatService>.Instance);
+        new(DummyClient(), options, "system", store, Array.Empty<IChatTool>(), NullLogger<StreamingChatService>.Instance);
 
     [Fact]
     public void Clamps_invalid_options_to_defaults()

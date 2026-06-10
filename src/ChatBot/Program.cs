@@ -21,6 +21,8 @@ var switchMappings = new Dictionary<string, string>
     ["--system"] = "ChatBot:SystemPrompt",
     ["--system-file"] = "ChatBot:SystemPromptFile",
     ["--history"] = "ChatBot:HistoryPath",
+    ["--store"] = "ChatBot:Store",
+    ["--conversation"] = "ChatBot:ConversationId",
 };
 
 // The command-line config provider can't express bare flags, so map --compaction manually.
@@ -85,7 +87,7 @@ if (chat.History.Count > 0)
     Console.WriteLine($"Resumed {chat.History.Count} turn(s).");
 
 Console.WriteLine("Claude Chatbot — 'exit'/'quit' to stop, 'clear' to wipe history, Ctrl-C to cancel a reply.");
-Console.WriteLine($"Model: {chat.Model}  |  MaxTokens: {chat.MaxTokens}  |  Context: " +
+Console.WriteLine($"Model: {chat.Model}  |  MaxTokens: {chat.MaxTokens}  |  Store: {options.Store}  |  Context: " +
                   (options.Compaction
                       ? "server-side compaction"
                       : options.MaxHistoryMessages > 0 ? $"last {options.MaxHistoryMessages} msgs" : "unlimited"));
@@ -171,10 +173,14 @@ static void PrintUsage()
           --max-history <n>      Recent-message cap  (ChatBot__MaxHistoryMessages, default 40; 0 = unlimited)
           --system <text>        System prompt text  (ChatBot__SystemPrompt)
           --system-file <path>   System prompt file  (ChatBot__SystemPromptFile)
-          --history <path>       History file path   (ChatBot__HistoryPath)
+          --history <path>       History file path   (ChatBot__HistoryPath; file store)
+          --store <backend>      Conversation store: file (default) or postgres (ChatBot__Store)
+          --conversation <id>    Conversation id for the postgres store (ChatBot__ConversationId)
           --compaction           Use server-side compaction instead of message-count trim
                                  (beta; non-streaming; ChatBot__Compaction=true)
           -h, --help             Show this help and exit
+
+        Postgres store also needs ChatBot__PostgresConnectionString.
 
         Requires the ANTHROPIC_API_KEY environment variable.
         In-chat commands: 'exit'/'quit' to stop, 'clear' to wipe saved history.

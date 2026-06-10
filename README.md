@@ -85,7 +85,10 @@ level is `Warning`, keeping normal runs quiet; raise it (e.g. `ChatBot`/`Default
 | `--max-history`   | `<n>`    | `ChatBot__MaxHistoryMessages` | `40`                 | Cap on recent messages sent per request. `0` = unlimited. Ignored when compaction is on. |
 | `--system`        | `<text>` | `ChatBot__SystemPrompt`       | helpful-assistant    | System prompt text (the bot's persona/instructions). |
 | `--system-file`   | `<path>` | `ChatBot__SystemPromptFile`   | —                    | Read the system prompt from a file (useful for long prompts). |
-| `--history`       | `<path>` | `ChatBot__HistoryPath`        | `%APPDATA%/ClaudeIntro/history.json` | Where the conversation is saved/loaded. |
+| `--history`       | `<path>` | `ChatBot__HistoryPath`        | `%APPDATA%/ClaudeIntro/history.json` | Where the conversation is saved/loaded (file store). |
+| `--store`         | `<name>` | `ChatBot__Store`              | `file`               | Conversation store backend: `file` or `postgres`. |
+| `--conversation`  | `<id>`   | `ChatBot__ConversationId`     | `default`            | Conversation row key for the Postgres store. |
+| *(n/a)*           | —        | `ChatBot__PostgresConnectionString` | —              | Npgsql connection string; required when `--store postgres`. |
 | `--compaction`    | *(flag)* | `ChatBot__Compaction`         | `false`              | Use beta server-side compaction (summarizes old turns) instead of the count-based trim. **Non-streaming**; requires a compaction-capable model (Opus 4.6+/Sonnet 4.6). |
 | `-h`, `--help`    | *(flag)* | —                             | —                    | Print usage and exit. |
 
@@ -149,10 +152,25 @@ crashing the turn.
 
 ## Conversation persistence
 
-Each exchange is saved to the history file (default
-`%APPDATA%/ClaudeIntro/history.json`) as JSON. On startup, if a saved
-conversation exists you are asked whether to resume it; the `clear` command (or
-deleting the file) starts fresh.
+Persistence is behind the `IConversationStore` abstraction, with two backends:
+
+- **File (default)** — JSON at `%APPDATA%/ClaudeIntro/history.json`. Zero setup.
+- **PostgreSQL** — opt-in with `--store postgres` plus `ChatBot__PostgresConnectionString`.
+  Turns are stored as a `jsonb` row keyed by `--conversation` (default `default`); the
+  table is created automatically on first use.
+
+On startup, if a saved conversation exists you are asked whether to resume it; the
+`clear` command starts fresh.
+
+```powershell
+# Run against a local Postgres (see docker-compose.yml)
+docker compose up -d
+$env:ChatBot__PostgresConnectionString = "Host=localhost;Username=chatbot;Password=chatbot;Database=chatbot"
+dotnet run --project src/ChatBot -- --store postgres
+```
+
+Add another backend (SQLite, a cloud DB, …) by implementing `IConversationStore`
+and registering it.
 
 ## Project layout
 
@@ -177,9 +195,11 @@ console host that references it.
 | &nbsp;&nbsp;`ChatOptions.cs`                  | Strongly-typed settings (the `ChatBot` section) |
 | &nbsp;&nbsp;`ServiceCollectionExtensions.cs`  | `AddChatBot` DI registration                   |
 | &nbsp;&nbsp;`StoredTurn.cs`                    | One persisted conversation turn (role + text)  |
-| &nbsp;&nbsp;`IConversationStore.cs`           | Persistence abstraction (file/SQLite/DB)       |
+| &nbsp;&nbsp;`IConversationStore.cs`           | Persistence abstraction                        |
 | &nbsp;&nbsp;`FileConversationStore.cs`        | JSON-file implementation of the store          |
+| &nbsp;&nbsp;`PostgresConversationStore.cs`    | PostgreSQL (`jsonb`) implementation of the store |
 | `tests/ChatBot.Tests/`                        | xUnit unit tests (reference `ChatBot.Core`)    |
+| `docker-compose.yml`                          | Local PostgreSQL for the opt-in store          |
 | `docs/feature-plan.md`                        | Feature plan and implementation notes          |
 
 ## Tests
@@ -190,8 +210,17 @@ dotnet test
 ```
 
 The tests cover the network-independent logic — history trimming, system-prompt
-resolution, the file store (round-trip/corrupt/clear), and engine option clamping
-and history seeding.
+resolution, the file store (round-trip/corrupt/clear), sample tools, and engine
+option clamping and history seeding.
+
+The PostgreSQL round-trip test is an **integration test** that runs only when a
+connection string is provided, and is skipped otherwise:
+
+```powershell
+docker compose up -d
+$env:CHATBOT_TEST_POSTGRES = "Host=localhost;Username=chatbot;Password=chatbot;Database=chatbot"
+dotnet test
+```
 
 ## Reusing the engine
 

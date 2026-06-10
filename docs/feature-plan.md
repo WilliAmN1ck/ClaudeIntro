@@ -153,8 +153,14 @@ First step: **dependency injection + configuration** (foundation for packaging t
 - Tool-use/tool-result turns are in-call only; persistence stays text-only. Tool use is streaming-mode only (compaction logs a warning and ignores tools).
 - Sample tools shipped in Core: `CurrentTimeTool`, `RollDiceTool` (registered by the host).
 
+### PostgreSQL store (opt-in)
+- `PostgresConversationStore : IConversationStore` (Npgsql, synchronous APIs — no engine change) stores turns as a `jsonb` row keyed by `ChatOptions.ConversationId`; the table is created on first use.
+- Selected via `ChatOptions.Store = "postgres"` with `PostgresConnectionString`; `AddChatBot` registers the chosen backend. File store remains the default.
+- Config/connection errors surface as a clear startup error (`InvalidOperationException`, caught by the host); transient runtime errors are logged and degrade.
+- Verified by a `[SkippableFact]` integration test that runs against `CHATBOT_TEST_POSTGRES` (skipped when unset); `docker-compose.yml` provides a local Postgres.
+
 ## Out of Scope (future)
 
 - Dollar-cost computation (needs a maintained price table); token counts are exposed so callers can derive it.
 - Tool use within compaction mode.
-- Additional `IConversationStore` backends (SQLite/DB) and broader engine tests via an SDK seam/mock.
+- Async `IConversationStore` surface (for high-concurrency hosts) and multi-conversation management beyond the single `ConversationId` key.
