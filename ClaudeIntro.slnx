@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/ChatBot.Core/ChatBot.Core.csproj" />
     <Project Path="src/ChatBot/ChatBot.csproj" />
   </Folder>
   <Folder Name="/tests/">

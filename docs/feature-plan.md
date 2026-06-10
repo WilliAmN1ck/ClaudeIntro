@@ -137,11 +137,15 @@ First step: **dependency injection + configuration** (foundation for packaging t
 - The engine owns load/save/clear through the store; the host only drives the resume prompt. Swapping in SQLite/DB is now a new implementation + DI registration.
 
 ### Production concerns
-- **Logging:** `ILogger` via DI (configured from the `Logging` section, written to stderr so it never mixes with the reply); the file store logs failures instead of writing to `Console.Error`.
+- **Logging:** `ILogger` via DI (the host configures providers from the `Logging` section, written to stderr so it never mixes with the reply); the file store logs failures instead of writing to `Console.Error`.
 - **Token usage:** `IChatService.LastTurnUsage` (`TokenUsage`) is captured from the stream/response and printed per turn.
 - **Cancellation:** `SendAsync` honors a `CancellationToken`; Ctrl-C cancels the in-progress reply (per-turn `CancellationTokenSource`) without exiting the app.
 - **Graceful errors:** API exceptions are caught in the host loop and reported inline (`[error] …`) rather than crashing.
 - **Tests:** `tests/ChatBot.Tests` (xUnit) covers `HistoryTrimmer`, system-prompt resolution, `FileConversationStore`, and engine option-clamping/seeding. Trimming was extracted to `HistoryTrimmer` and turns are committed only on a successful turn, both of which made the engine testable.
+
+### Library split
+- The engine moved to a class library, `src/ChatBot.Core`, with a minimal dependency surface (Anthropic SDK + Microsoft.Extensions DI/Options/Configuration/Logging *abstractions*). `src/ChatBot` is now just the console host (`Program.cs` + `appsettings.json`) referencing it; `tests/ChatBot.Tests` references the library.
+- `AddChatBot` no longer configures logging — the consumer supplies logging providers. The console host configures the stderr console logger itself. This makes the library safe to drop into any host (web/GUI/service).
 
 ## Out of Scope (future)
 

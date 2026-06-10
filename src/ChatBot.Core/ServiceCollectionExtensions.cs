@@ -1,7 +1,6 @@
 using Anthropic;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 namespace ChatBot;
 
@@ -13,21 +12,13 @@ public static class ServiceCollectionExtensions
     /// <c>ChatBot</c> configuration section and registers the <see cref="AnthropicClient"/>
     /// (API key read from the <c>ANTHROPIC_API_KEY</c> environment variable).
     /// </summary>
+    /// <remarks>
+    /// Does not configure logging — the engine logs through <c>ILogger</c> and the
+    /// consumer supplies the logging providers (e.g. <c>services.AddLogging(...)</c>).
+    /// </remarks>
     public static IServiceCollection AddChatBot(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<ChatOptions>(config.GetSection(ChatOptions.SectionName));
-
-        // Logging is configured from the "Logging" section; default level keeps the
-        // console clean during chat (warnings/errors still surface). Writes to stderr
-        // so log lines don't interleave with the streamed reply on stdout.
-        services.AddLogging(builder =>
-        {
-            builder.AddConfiguration(config.GetSection("Logging"));
-            builder.AddSimpleConsole(options => options.SingleLine = true);
-            // Route log output to stderr so it never interleaves with the reply on stdout.
-            builder.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(
-                options => options.LogToStandardErrorThreshold = LogLevel.Trace);
-        });
 
         services.AddSingleton(_ =>
         {
