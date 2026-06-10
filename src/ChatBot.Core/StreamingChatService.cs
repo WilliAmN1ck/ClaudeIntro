@@ -1,7 +1,5 @@
 using System.Runtime.CompilerServices;
 using System.Text;
-using Anthropic;
-using Anthropic.Helpers;
 using Anthropic.Models.Messages;
 using Microsoft.Extensions.Logging;
 
@@ -10,17 +8,17 @@ namespace ChatBot;
 /// <summary>
 /// Default chat engine: streams replies token-by-token, manages context with a
 /// simple count-based trim, and runs an agentic tool loop when tools are registered.
+/// Talks to the API through <see cref="IChatCompletionClient"/> so the loop is testable.
 /// </summary>
 public sealed class StreamingChatService : IChatService
 {
-    private readonly AnthropicClient _client;
+    private readonly IChatCompletionClient _completion;
     private readonly IConversationStore _store;
+    private readonly ToolInvoker _tools;
     private readonly ILogger<StreamingChatService> _logger;
     private readonly int _maxHistoryMessages;
     private readonly List<TextBlockParam> _systemBlocks;
     private readonly List<StoredTurn> _turns = new();
-    private readonly IReadOnlyList<IChatTool> _tools;
-    private readonly List<ToolUnion> _toolUnions;
 
     public string Model { get; }
     public long MaxTokens { get; }
@@ -29,15 +27,16 @@ public sealed class StreamingChatService : IChatService
     public TokenUsage? LastTurnUsage { get; private set; }
 
     public StreamingChatService(
-        AnthropicClient client,
+        IChatCompletionClient completion,
         ChatOptions options,
         string systemPrompt,
         IConversationStore store,
         IEnumerable<IChatTool> tools,
         ILogger<StreamingChatService> logger)
     {
-        _client = client;
+        _completion = completion;
         _store = store;
+        _tools = new ToolInvoker(tools);
         _logger = logger;
         Model = string.IsNullOrWhiteSpace(options.Model) ? "claude-opus-4-8" : options.Model.Trim();
         MaxTokens = options.MaxTokens >= 1 ? options.MaxTokens : 4096;
@@ -49,11 +48,6 @@ public sealed class StreamingChatService : IChatService
         {
             new() { Text = systemPrompt, CacheControl = new CacheControlEphemeral() },
         };
-
-        _tools = tools.ToList();
-        _toolUnions = new List<ToolUnion>();
-        foreach (IChatTool tool in _tools)
-            _toolUnions.Add(BuildSdkTool(tool));
 
         _turns.AddRange(store.Load());
     }
@@ -70,8 +64,8 @@ public sealed class StreamingChatService : IChatService
         // Build the in-call conversation from existing turns plus the new (not-yet-
         // committed) user message, trimmed to the recent window. Tool-use/tool-result
         // turns added during the loop are in-call only; persistence stays text-only.
-        var pending = new List<StoredTurn>(_turns) { new("user", userMessage) };
-        var conversation = HistoryTrimmer.Trim(pending, _maxHistoryMessages)
+        var conversation = HistoryTrimmer
+            .Trim(new List<StoredTurn>(_turns) { new("user", userMessage) }, _maxHistoryMessages)
             .Select(t => t.ToMessage())
             .ToList();
 
@@ -87,41 +81,45 @@ public sealed class StreamingChatService : IChatService
                 MaxTokens = MaxTokens,
                 System = _systemBlocks,
                 Messages = conversation,
-                Tools = _toolUnions.Count > 0 ? _toolUnions : null,
+                Tools = _tools.Tools.Count > 0 ? _tools.ToolUnions.ToList() : null,
             };
 
-            var aggregator = new MessageContentAggregator();
-            await foreach (RawMessageStreamEvent streamEvent in
-                           _client.Messages.CreateStreaming(parameters)
-                                  .CollectAsync(aggregator)
-                                  .WithCancellation(cancellationToken))
+            _logger.LogInformation("Streaming request: {MessageCount} message(s) in context", conversation.Count);
+
+            ICompletionStream stream = _completion.Stream(parameters, cancellationToken);
+
+            var turnText = new StringBuilder();
+            await foreach (string delta in stream.ReadTextAsync(cancellationToken))
             {
-                if (streamEvent.TryPickContentBlockDelta(out var delta) &&
-                    delta.Delta.TryPickText(out var text))
-                {
-                    reply.Append(text.Text);
-                    yield return text.Text;
-                }
+                turnText.Append(delta);
+                reply.Append(delta);
+                yield return delta;
             }
 
-            Message message = aggregator.Message();
-            inputTokens += message.Usage.InputTokens;
-            outputTokens += message.Usage.OutputTokens;
-            cacheRead += message.Usage.CacheReadInputTokens ?? 0;
-            cacheCreation += message.Usage.CacheCreationInputTokens ?? 0;
+            CompletionResult result = stream.GetResult();
+            inputTokens += result.Usage.InputTokens;
+            outputTokens += result.Usage.OutputTokens;
+            cacheRead += result.Usage.CacheReadTokens;
+            cacheCreation += result.Usage.CacheCreationTokens;
 
-            conversation.Add(new MessageParam { Role = Role.Assistant, Content = ToAssistantParams(message.Content) });
+            // Echo the assistant turn (text + any tool calls) back into the conversation.
+            var assistantContent = new List<ContentBlockParam>();
+            if (turnText.Length > 0)
+                assistantContent.Add(new TextBlockParam { Text = turnText.ToString() });
+            foreach (ToolCall call in result.ToolCalls)
+                assistantContent.Add(new ToolUseBlockParam { ID = call.Id, Name = call.Name, Input = call.Input });
+            conversation.Add(new MessageParam { Role = Role.Assistant, Content = assistantContent });
 
-            var toolUses = message.Content.Select(b => b.Value).OfType<ToolUseBlock>().ToList();
-            if (message.StopReason != "tool_use" || toolUses.Count == 0)
+            if (!result.StoppedForToolUse || result.ToolCalls.Count == 0)
                 break;
 
             var results = new List<ContentBlockParam>();
-            foreach (ToolUseBlock toolUse in toolUses)
+            foreach (ToolCall call in result.ToolCalls)
             {
-                yield return $"\n[tool: {toolUse.Name}]\n";
-                string result = await ExecuteToolAsync(toolUse, cancellationToken);
-                results.Add(new ToolResultBlockParam { ToolUseID = toolUse.ID, Content = result });
+                yield return $"\n[tool: {call.Name}]\n";
+                _logger.LogInformation("Executing tool {Tool}", call.Name);
+                string toolResult = await _tools.InvokeAsync(call.Name, call.Input, cancellationToken);
+                results.Add(new ToolResultBlockParam { ToolUseID = call.Id, Content = toolResult });
             }
             conversation.Add(new MessageParam { Role = Role.User, Content = results });
         }
@@ -133,47 +131,5 @@ public sealed class StreamingChatService : IChatService
         _store.Save(_turns);
 
         _logger.LogInformation("Turn complete: {Usage}", LastTurnUsage);
-    }
-
-    private async Task<string> ExecuteToolAsync(ToolUseBlock toolUse, CancellationToken cancellationToken)
-    {
-        IChatTool? tool = _tools.FirstOrDefault(t => t.Name == toolUse.Name);
-        if (tool is null)
-            return $"Error: unknown tool '{toolUse.Name}'.";
-
-        try
-        {
-            _logger.LogInformation("Executing tool {Tool}", toolUse.Name);
-            return await tool.ExecuteAsync(toolUse.Input, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(ex, "Tool {Tool} failed", toolUse.Name);
-            return $"Error executing '{toolUse.Name}': {ex.Message}";
-        }
-    }
-
-    private static Tool BuildSdkTool(IChatTool tool) => new()
-    {
-        Name = tool.Name,
-        Description = tool.Description,
-        InputSchema = new()
-        {
-            Properties = tool.Properties.ToDictionary(kv => kv.Key, kv => kv.Value),
-            Required = tool.Required.ToList(),
-        },
-    };
-
-    private static List<ContentBlockParam> ToAssistantParams(IReadOnlyList<ContentBlock> content)
-    {
-        var blocks = new List<ContentBlockParam>();
-        foreach (ContentBlock block in content)
-        {
-            if (block.TryPickText(out TextBlock? text))
-                blocks.Add(new TextBlockParam { Text = text.Text });
-            else if (block.TryPickToolUse(out ToolUseBlock? toolUse))
-                blocks.Add(new ToolUseBlockParam { ID = toolUse.ID, Name = toolUse.Name, Input = toolUse.Input });
-        }
-        return blocks;
     }
 }

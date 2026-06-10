@@ -159,6 +159,16 @@ First step: **dependency injection + configuration** (foundation for packaging t
 - Config/connection errors surface as a clear startup error (`InvalidOperationException`, caught by the host); transient runtime errors are logged and degrade.
 - Verified by a `[SkippableFact]` integration test that runs against `CHATBOT_TEST_POSTGRES` (skipped when unset); `docker-compose.yml` provides a local Postgres.
 
+## Hardening (review-driven)
+
+### Continuous integration
+- `.github/workflows/ci.yml` runs `restore`/`build`/`test` (Release, .NET 10) on pushes to `main` and on PRs, so broken builds or failing/non-compiling tests are caught before merge.
+
+### Testable engine (tool loop)
+- The SDK streaming call is abstracted behind `IChatCompletionClient` / `ICompletionStream`, returning text deltas plus a domain `CompletionResult` (stop-for-tools, `ToolCall`s, `TokenUsage`). `AnthropicCompletionClient` is the real implementation; tests script a fake.
+- Tool dispatch and SDK tool-definition building moved to `ToolInvoker` (pure, unit-tested directly).
+- `StreamingChatService` now drives the loop over these seams, so the agentic flow (multi-iteration tool_use → tool_result → end_turn, usage summing, commit-on-success, unknown-tool recovery) is unit-tested without the network.
+
 ## Out of Scope (future)
 
 - Dollar-cost computation (needs a maintained price table); token counts are exposed so callers can derive it.
