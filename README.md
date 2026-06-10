@@ -55,26 +55,33 @@ Type messages at the `You:` prompt. The reply streams in under `Claude:`.
 | `exit` / `quit` | End the session                          |
 | `clear`         | Wipe the saved conversation history      |
 
-## Command-line options
+## Configuration
 
-Pass options after `--` so `dotnet` forwards them to the app. **Precedence:
-CLI flag > environment variable > built-in default.**
+Settings are loaded with the standard .NET configuration stack, in increasing
+order of precedence:
 
-| Flag              | Argument | Env var                         | Default              | Description |
-| ----------------- | -------- | ------------------------------- | -------------------- | ----------- |
-| `--model`         | `<id>`   | `ANTHROPIC_MODEL`               | `claude-opus-4-8`    | Model id (e.g. `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`). |
-| `--max-tokens`    | `<n>`    | `ANTHROPIC_MAX_TOKENS`          | `4096`               | Max output tokens per reply (must be ≥ 1). |
-| `--max-history`   | `<n>`    | `ANTHROPIC_MAX_HISTORY_MESSAGES`| `40`                 | Cap on recent messages sent per request. `0` = unlimited. Ignored when `--compaction` is used. |
-| `--system`        | `<text>` | `ANTHROPIC_SYSTEM_PROMPT`       | helpful-assistant    | System prompt text (the bot's persona/instructions). |
-| `--system-file`   | `<path>` | `ANTHROPIC_SYSTEM_PROMPT_FILE`  | —                    | Read the system prompt from a file (useful for long prompts). |
-| `--history`       | `<path>` | `ANTHROPIC_HISTORY_FILE`        | `%APPDATA%/ClaudeIntro/history.json` | Where the conversation is saved/loaded. |
-| `--compaction`    | *(flag)* | `ANTHROPIC_COMPACTION=1`        | off                  | Use beta server-side compaction (summarizes old turns) instead of the count-based trim. **Non-streaming**; requires a compaction-capable model (Opus 4.6+/Sonnet 4.6). |
-| `-h`, `--help`    | *(flag)* | —                               | —                    | Print usage and exit. |
+1. **`appsettings.json`** (the `ChatBot` section) — checked-in defaults.
+2. **Environment variables** — the config key with a `__` separator, e.g.
+   `ChatBot__Model`.
+3. **Command-line flags** — listed below.
 
-The system prompt resolves in this order: `--system` → `--system-file` →
-`ANTHROPIC_SYSTEM_PROMPT_FILE` → `ANTHROPIC_SYSTEM_PROMPT` → default.
+> **Note:** `ANTHROPIC_API_KEY` is separate from this stack — it is always read
+> directly from the environment (see Setup) and is never put in `appsettings.json`.
 
-Flags accept either `--flag value` or `--flag=value`.
+| Flag              | Argument | Config key / env var          | Default              | Description |
+| ----------------- | -------- | ----------------------------- | -------------------- | ----------- |
+| `--model`         | `<id>`   | `ChatBot__Model`              | `claude-opus-4-8`    | Model id (e.g. `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`). |
+| `--max-tokens`    | `<n>`    | `ChatBot__MaxTokens`          | `4096`               | Max output tokens per reply. |
+| `--max-history`   | `<n>`    | `ChatBot__MaxHistoryMessages` | `40`                 | Cap on recent messages sent per request. `0` = unlimited. Ignored when compaction is on. |
+| `--system`        | `<text>` | `ChatBot__SystemPrompt`       | helpful-assistant    | System prompt text (the bot's persona/instructions). |
+| `--system-file`   | `<path>` | `ChatBot__SystemPromptFile`   | —                    | Read the system prompt from a file (useful for long prompts). |
+| `--history`       | `<path>` | `ChatBot__HistoryPath`        | `%APPDATA%/ClaudeIntro/history.json` | Where the conversation is saved/loaded. |
+| `--compaction`    | *(flag)* | `ChatBot__Compaction`         | `false`              | Use beta server-side compaction (summarizes old turns) instead of the count-based trim. **Non-streaming**; requires a compaction-capable model (Opus 4.6+/Sonnet 4.6). |
+| `-h`, `--help`    | *(flag)* | —                             | —                    | Print usage and exit. |
+
+Pass flags after `--` so `dotnet` forwards them to the app. Flags accept either
+`--flag value` or `--flag=value`. The system prompt resolves as: `SystemPrompt`
+(inline) → `SystemPromptFile` (file contents) → default.
 
 ### Examples
 
@@ -104,10 +111,13 @@ deleting the file) starts fresh.
 
 ## Project layout
 
-| Path                              | Purpose                                        |
-| --------------------------------- | ---------------------------------------------- |
-| `ClaudeIntro.slnx`                | Solution file                                  |
-| `src/ChatBot/Program.cs`          | Entry point, config resolution, and chat loop  |
-| `src/ChatBot/ConversationStore.cs`| JSON load/save of conversation history         |
-| `src/ChatBot/CompactionChat.cs`   | Beta server-side compaction backend            |
-| `docs/feature-plan.md`            | Feature plan and implementation notes          |
+| Path                                      | Purpose                                        |
+| ----------------------------------------- | ---------------------------------------------- |
+| `ClaudeIntro.slnx`                        | Solution file                                  |
+| `src/ChatBot/Program.cs`                  | Entry point: builds config + DI, runs chat loop |
+| `src/ChatBot/ChatOptions.cs`              | Strongly-typed settings (the `ChatBot` section) |
+| `src/ChatBot/ServiceCollectionExtensions.cs` | `AddChatBot` DI registration                |
+| `src/ChatBot/ConversationStore.cs`        | JSON load/save of conversation history         |
+| `src/ChatBot/CompactionChat.cs`           | Beta server-side compaction backend            |
+| `src/ChatBot/appsettings.json`            | Default configuration values                   |
+| `docs/feature-plan.md`                    | Feature plan and implementation notes          |

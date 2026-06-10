@@ -112,15 +112,22 @@ Default model: `claude-opus-4-8`.
 
 ### CLI flags
 - `--model`, `--max-tokens`, `--max-history`, `--system`, `--system-file`, `--history`, `--compaction`, and `-h/--help`.
-- Precedence: CLI flag > env var > default. `--help` prints usage and exits before the API-key check.
-- Parsed by a small `ParseArgs` helper supporting `--key value`, `--key=value`, and bare `--flag`.
+- `--help` prints usage and exits before the API-key check.
 
 ### Server-side compaction (beta)
-- `--compaction` (or `ANTHROPIC_COMPACTION=1`) switches from the count-based trim to the API's `compact-2026-01-12` context management, which summarizes old turns server-side.
+- `--compaction` (or `ChatBot__Compaction=true`) switches from the count-based trim to the API's `compact-2026-01-12` context management, which summarizes old turns server-side.
 - Implemented in `src/ChatBot/CompactionChat.cs` against `client.Beta.Messages`; it round-trips full response content (preserving compaction blocks) each turn.
 - This mode is non-streaming (the beta path used here returns a complete message); the default streaming mode is unchanged. Requires a compaction-capable model (Opus 4.6+/Sonnet 4.6).
 
+## Toward a reusable library
+
+First step: **dependency injection + configuration** (foundation for packaging the chat engine for reuse).
+- `Microsoft.Extensions.Hosting` brings the config/DI/options stack.
+- `ChatOptions` (the `ChatBot` config section) is the strongly-typed settings surface.
+- `ServiceCollectionExtensions.AddChatBot(IServiceCollection, IConfiguration)` registers options + `AnthropicClient` — the idiomatic consumer entry point.
+- Settings load from `appsettings.json` → environment variables (`ChatBot__*`) → CLI flags (each overrides the previous). `ANTHROPIC_API_KEY` is read directly from the environment.
+
 ## Out of Scope (future)
 
+- Extract the chat loop into a console-agnostic `ChatSession`/`IChatService` engine (the next step toward a NuGet library).
 - CLI streaming within compaction mode (would need beta streaming + compaction-block accumulation).
-- A config file (currently CLI-flag and env-var driven only).
