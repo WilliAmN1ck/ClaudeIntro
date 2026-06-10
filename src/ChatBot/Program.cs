@@ -1,4 +1,5 @@
 using ChatBot;
+using ChatBot.Tools;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -44,6 +45,9 @@ using ServiceProvider provider = new ServiceCollection()
         builder.AddSimpleConsole(o => o.SingleLine = true);
         builder.Services.Configure<ConsoleLoggerOptions>(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
     })
+    // Tools the model may call. Register your own IChatTool implementations here.
+    .AddSingleton<IChatTool, CurrentTimeTool>()
+    .AddSingleton<IChatTool, RollDiceTool>()
     .AddChatBot(config)
     .BuildServiceProvider();
 
@@ -86,6 +90,9 @@ Console.WriteLine($"Model: {chat.Model}  |  MaxTokens: {chat.MaxTokens}  |  Cont
                       ? "server-side compaction"
                       : options.MaxHistoryMessages > 0 ? $"last {options.MaxHistoryMessages} msgs" : "unlimited"));
 Console.WriteLine($"Persona: {chat.SystemPrompt}");
+var toolNames = provider.GetServices<IChatTool>().Select(t => t.Name).ToList();
+if (toolNames.Count > 0 && !options.Compaction)
+    Console.WriteLine($"Tools: {string.Join(", ", toolNames)}");
 Console.WriteLine(new string('-', 50));
 
 // Ctrl-C cancels the in-progress reply without killing the app; at the prompt it exits normally.

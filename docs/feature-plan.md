@@ -147,8 +147,14 @@ First step: **dependency injection + configuration** (foundation for packaging t
 - The engine moved to a class library, `src/ChatBot.Core`, with a minimal dependency surface (Anthropic SDK + Microsoft.Extensions DI/Options/Configuration/Logging *abstractions*). `src/ChatBot` is now just the console host (`Program.cs` + `appsettings.json`) referencing it; `tests/ChatBot.Tests` references the library.
 - `AddChatBot` no longer configures logging — the consumer supplies logging providers. The console host configures the stderr console logger itself. This makes the library safe to drop into any host (web/GUI/service).
 
+### Tool use / function calling
+- `IChatTool` (name, description, JSON-schema `Properties`/`Required`, `ExecuteAsync`) is the consumer-implementable tool contract; `ToolSchema` provides parameter helpers. Tools are registered in DI and injected into the engine.
+- `StreamingChatService` runs the agentic loop: stream text → on `stop_reason == tool_use`, execute each tool and send `tool_result` back → repeat until `end_turn`. Tool failures return an error string instead of crashing; usage is summed across loop iterations.
+- Tool-use/tool-result turns are in-call only; persistence stays text-only. Tool use is streaming-mode only (compaction logs a warning and ignores tools).
+- Sample tools shipped in Core: `CurrentTimeTool`, `RollDiceTool` (registered by the host).
+
 ## Out of Scope (future)
 
 - Dollar-cost computation (needs a maintained price table); token counts are exposed so callers can derive it.
-- CLI streaming within compaction mode (would need beta streaming + compaction-block accumulation).
+- Tool use within compaction mode.
 - Additional `IConversationStore` backends (SQLite/DB) and broader engine tests via an SDK seam/mock.
