@@ -26,6 +26,7 @@ public static class ServiceCollectionExtensions
             return new AnthropicClient { ApiKey = apiKey };
         });
 
+        services.AddSingleton<IConversationStore, FileConversationStore>();
         services.AddSingleton<IChatServiceFactory, ChatServiceFactory>();
 
         return services;

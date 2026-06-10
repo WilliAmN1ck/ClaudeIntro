@@ -14,6 +14,7 @@ namespace ChatBot;
 public sealed class CompactionChatService : IChatService
 {
     private readonly AnthropicClient _client;
+    private readonly IConversationStore _store;
     private readonly string _system;
     private readonly List<BetaMessageParam> _betaHistory = new();
     private readonly List<StoredTurn> _turns = new();
@@ -24,15 +25,16 @@ public sealed class CompactionChatService : IChatService
     public IReadOnlyList<StoredTurn> History => _turns;
 
     public CompactionChatService(
-        AnthropicClient client, ChatOptions options, string systemPrompt, IEnumerable<StoredTurn> seed)
+        AnthropicClient client, ChatOptions options, string systemPrompt, IConversationStore store)
     {
         _client = client;
+        _store = store;
         Model = string.IsNullOrWhiteSpace(options.Model) ? "claude-opus-4-8" : options.Model.Trim();
         MaxTokens = options.MaxTokens >= 1 ? options.MaxTokens : 4096;
         _system = systemPrompt;
         SystemPrompt = systemPrompt;
 
-        foreach (StoredTurn turn in seed)
+        foreach (StoredTurn turn in store.Load())
         {
             _turns.Add(turn);
             Role role = turn.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase)
@@ -46,6 +48,7 @@ public sealed class CompactionChatService : IChatService
     {
         _betaHistory.Clear();
         _turns.Clear();
+        _store.Clear();
     }
 
     public async IAsyncEnumerable<string> SendAsync(
@@ -90,6 +93,7 @@ public sealed class CompactionChatService : IChatService
 
         string reply = text.ToString();
         _turns.Add(new StoredTurn("assistant", reply));
+        _store.Save(_turns);
         yield return reply;
     }
 }

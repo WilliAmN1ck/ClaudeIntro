@@ -51,29 +51,24 @@ catch (InvalidOperationException ex)
     return 1;
 }
 
-string historyPath = string.IsNullOrWhiteSpace(options.HistoryPath)
-    ? ConversationStore.DefaultPath
-    : options.HistoryPath;
+IConversationStore store = provider.GetRequiredService<IConversationStore>();
 
-// Resume decision is a host (console) concern; the engine just gets the seed turns.
-var seed = new List<StoredTurn>();
-if (ConversationStore.Exists(historyPath))
+// Resume is a host (console) concern. Declining wipes the store, so the engine
+// (which loads its history from the store) starts fresh.
+if (store.Exists())
 {
-    Console.Write($"Found a saved conversation at {historyPath}. Resume it? [Y/n] ");
+    Console.Write("Found a saved conversation. Resume it? [Y/n] ");
     string? answer = Console.ReadLine();
-    if (answer is null || !answer.Trim().Equals("n", StringComparison.OrdinalIgnoreCase))
+    if (answer is not null && answer.Trim().Equals("n", StringComparison.OrdinalIgnoreCase))
     {
-        seed = ConversationStore.Load(historyPath);
-        Console.WriteLine($"Resumed {seed.Count} turn(s).");
-    }
-    else
-    {
-        ConversationStore.Clear(historyPath);
+        store.Clear();
         Console.WriteLine("Started a fresh conversation.");
     }
 }
 
-IChatService chat = factory.Create(seed);
+IChatService chat = factory.Create();
+if (chat.History.Count > 0)
+    Console.WriteLine($"Resumed {chat.History.Count} turn(s).");
 
 Console.WriteLine("Claude Chatbot — type 'exit'/'quit' to stop, 'clear' to wipe saved history.");
 Console.WriteLine($"Model: {chat.Model}  |  MaxTokens: {chat.MaxTokens}  |  Context: " +
@@ -97,7 +92,6 @@ while (true)
 
     if (input.Trim().Equals("clear", StringComparison.OrdinalIgnoreCase))
     {
-        ConversationStore.Clear(historyPath);
         chat.Clear();
         Console.WriteLine("Conversation history cleared.");
         continue;
@@ -107,8 +101,6 @@ while (true)
     await foreach (string delta in chat.SendAsync(input.Trim()))
         Console.Write(delta);
     Console.WriteLine();
-
-    ConversationStore.Save(historyPath, chat.History);
 }
 
 Console.WriteLine("\nGoodbye!");
