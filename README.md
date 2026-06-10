@@ -187,10 +187,13 @@ console host that references it.
 | &nbsp;&nbsp;`appsettings.json`                | Default configuration values                   |
 | `src/ChatBot.Core/` (library)                 | The reusable chat engine                       |
 | &nbsp;&nbsp;`IChatService.cs`                 | Console-agnostic chat engine interface         |
-| &nbsp;&nbsp;`StreamingChatService.cs`         | Streaming engine (token-by-token + count-based trim) |
+| &nbsp;&nbsp;`StreamingChatService.cs`         | Streaming engine (token-by-token + count-based trim + tool loop) |
 | &nbsp;&nbsp;`CompactionChatService.cs`        | Beta server-side compaction engine             |
+| &nbsp;&nbsp;`IChatCompletionClient.cs`        | Seam over the streaming API (makes the loop testable) |
+| &nbsp;&nbsp;`AnthropicCompletionClient.cs`    | Real `IChatCompletionClient` (wraps the SDK)   |
 | &nbsp;&nbsp;`ChatServiceFactory.cs`           | Picks the engine from options; resolves the system prompt |
 | &nbsp;&nbsp;`IChatTool.cs` / `ToolSchema.cs`  | Tool abstraction + schema helpers              |
+| &nbsp;&nbsp;`ToolInvoker.cs`                   | Tool dispatch + SDK tool-definition building (unit-tested) |
 | &nbsp;&nbsp;`Tools/`                          | Sample tools (`CurrentTimeTool`, `RollDiceTool`) |
 | &nbsp;&nbsp;`HistoryTrimmer.cs`               | Pure context-window trim (unit-tested)         |
 | &nbsp;&nbsp;`TokenUsage.cs`                    | Per-turn token counts                          |
@@ -212,7 +215,8 @@ dotnet test
 ```
 
 The tests cover the network-independent logic — history trimming, system-prompt
-resolution, the file store (round-trip/corrupt/clear), sample tools, and engine
+resolution, the file store (round-trip/corrupt/clear), sample tools, tool dispatch,
+the **agentic tool loop** (via a scripted `IChatCompletionClient` fake), and engine
 option clamping and history seeding.
 
 The PostgreSQL round-trip test is an **integration test** that runs only when a

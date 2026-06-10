@@ -20,6 +20,7 @@ public sealed class ChatServiceFactory : IChatServiceFactory
     private const string DefaultSystemPrompt = "You are a helpful, concise assistant.";
 
     private readonly AnthropicClient _client;
+    private readonly IChatCompletionClient _completion;
     private readonly ChatOptions _options;
     private readonly IConversationStore _store;
     private readonly IReadOnlyList<IChatTool> _tools;
@@ -27,12 +28,14 @@ public sealed class ChatServiceFactory : IChatServiceFactory
 
     public ChatServiceFactory(
         AnthropicClient client,
+        IChatCompletionClient completion,
         IOptions<ChatOptions> options,
         IConversationStore store,
         IEnumerable<IChatTool> tools,
         ILoggerFactory loggerFactory)
     {
         _client = client;
+        _completion = completion;
         _options = options.Value;
         _store = store;
         _tools = tools.ToList();
@@ -55,7 +58,7 @@ public sealed class ChatServiceFactory : IChatServiceFactory
                 _loggerFactory.CreateLogger<CompactionChatService>());
         }
 
-        return new StreamingChatService(_client, _options, systemPrompt, _store, _tools,
+        return new StreamingChatService(_completion, _options, systemPrompt, _store, _tools,
             _loggerFactory.CreateLogger<StreamingChatService>());
     }
 
