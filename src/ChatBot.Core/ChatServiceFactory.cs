@@ -22,25 +22,41 @@ public sealed class ChatServiceFactory : IChatServiceFactory
     private readonly AnthropicClient _client;
     private readonly ChatOptions _options;
     private readonly IConversationStore _store;
+    private readonly IReadOnlyList<IChatTool> _tools;
     private readonly ILoggerFactory _loggerFactory;
 
     public ChatServiceFactory(
-        AnthropicClient client, IOptions<ChatOptions> options, IConversationStore store, ILoggerFactory loggerFactory)
+        AnthropicClient client,
+        IOptions<ChatOptions> options,
+        IConversationStore store,
+        IEnumerable<IChatTool> tools,
+        ILoggerFactory loggerFactory)
     {
         _client = client;
         _options = options.Value;
         _store = store;
+        _tools = tools.ToList();
         _loggerFactory = loggerFactory;
     }
 
     public IChatService Create()
     {
         string systemPrompt = ResolveSystemPrompt(_options);
-        return _options.Compaction
-            ? new CompactionChatService(_client, _options, systemPrompt, _store,
-                _loggerFactory.CreateLogger<CompactionChatService>())
-            : new StreamingChatService(_client, _options, systemPrompt, _store,
-                _loggerFactory.CreateLogger<StreamingChatService>());
+
+        if (_options.Compaction)
+        {
+            if (_tools.Count > 0)
+            {
+                _loggerFactory.CreateLogger<ChatServiceFactory>()
+                    .LogWarning("Tools are not used in compaction mode; {Count} tool(s) ignored.", _tools.Count);
+            }
+
+            return new CompactionChatService(_client, _options, systemPrompt, _store,
+                _loggerFactory.CreateLogger<CompactionChatService>());
+        }
+
+        return new StreamingChatService(_client, _options, systemPrompt, _store, _tools,
+            _loggerFactory.CreateLogger<StreamingChatService>());
     }
 
     /// <summary>

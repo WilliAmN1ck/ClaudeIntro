@@ -3,8 +3,9 @@
 A small multi-turn console chatbot built with **C# / .NET 10** and the official
 [Anthropic .NET SDK](https://www.nuget.org/packages/Anthropic). It streams
 Claude's replies token-by-token, persists conversations across runs, supports a
-configurable system prompt, and offers context-window management via either a
-message-count cap or beta server-side compaction.
+configurable system prompt, runs **tools** the model can call, and offers
+context-window management via either a message-count cap or beta server-side
+compaction. The engine lives in a reusable `ChatBot.Core` library.
 
 ## Prerequisites
 
@@ -111,6 +112,41 @@ dotnet run --project src/ChatBot -- --compaction
 dotnet run --project src/ChatBot -- --help
 ```
 
+## Tools
+
+The model can call **tools** (functions) mid-conversation. The default streaming
+engine runs an agentic loop: it streams text, and if Claude requests a tool it
+executes the tool, returns the result, and continues until done. A `[tool: name]`
+line marks each call. (Tool use is **not** available in `--compaction` mode.)
+
+Two sample tools ship in `ChatBot.Core` and are registered by the console host:
+`get_current_time` and `roll_dice`.
+
+Add your own by implementing `IChatTool` and registering it before `AddChatBot`:
+
+```csharp
+public sealed class GetWeatherTool : IChatTool
+{
+    public string Name => "get_weather";
+    public string Description => "Get the current weather for a city.";
+    public IReadOnlyDictionary<string, JsonElement> Properties => new Dictionary<string, JsonElement>
+    {
+        ["city"] = ToolSchema.String("City name, e.g. Paris"),
+    };
+    public IReadOnlyList<string> Required => new[] { "city" };
+
+    public Task<string> ExecuteAsync(IReadOnlyDictionary<string, JsonElement> args, CancellationToken ct)
+        => Task.FromResult($"It's sunny in {args["city"].GetString()}.");
+}
+
+// registration
+services.AddSingleton<IChatTool, GetWeatherTool>();
+```
+
+`ToolSchema` provides `String`/`Integer`/`Number`/`Boolean` helpers for parameter
+definitions. Tool failures are returned to the model as an error string rather than
+crashing the turn.
+
 ## Conversation persistence
 
 Each exchange is saved to the history file (default
@@ -134,6 +170,8 @@ console host that references it.
 | &nbsp;&nbsp;`StreamingChatService.cs`         | Streaming engine (token-by-token + count-based trim) |
 | &nbsp;&nbsp;`CompactionChatService.cs`        | Beta server-side compaction engine             |
 | &nbsp;&nbsp;`ChatServiceFactory.cs`           | Picks the engine from options; resolves the system prompt |
+| &nbsp;&nbsp;`IChatTool.cs` / `ToolSchema.cs`  | Tool abstraction + schema helpers              |
+| &nbsp;&nbsp;`Tools/`                          | Sample tools (`CurrentTimeTool`, `RollDiceTool`) |
 | &nbsp;&nbsp;`HistoryTrimmer.cs`               | Pure context-window trim (unit-tested)         |
 | &nbsp;&nbsp;`TokenUsage.cs`                    | Per-turn token counts                          |
 | &nbsp;&nbsp;`ChatOptions.cs`                  | Strongly-typed settings (the `ChatBot` section) |
