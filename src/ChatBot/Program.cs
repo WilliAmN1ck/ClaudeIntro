@@ -70,13 +70,24 @@ IChatService chat = factory.Create();
 if (chat.History.Count > 0)
     Console.WriteLine($"Resumed {chat.History.Count} turn(s).");
 
-Console.WriteLine("Claude Chatbot — type 'exit'/'quit' to stop, 'clear' to wipe saved history.");
+Console.WriteLine("Claude Chatbot — 'exit'/'quit' to stop, 'clear' to wipe history, Ctrl-C to cancel a reply.");
 Console.WriteLine($"Model: {chat.Model}  |  MaxTokens: {chat.MaxTokens}  |  Context: " +
                   (options.Compaction
                       ? "server-side compaction"
                       : options.MaxHistoryMessages > 0 ? $"last {options.MaxHistoryMessages} msgs" : "unlimited"));
 Console.WriteLine($"Persona: {chat.SystemPrompt}");
 Console.WriteLine(new string('-', 50));
+
+// Ctrl-C cancels the in-progress reply without killing the app; at the prompt it exits normally.
+CancellationTokenSource? turnCts = null;
+Console.CancelKeyPress += (_, e) =>
+{
+    if (turnCts is { IsCancellationRequested: false })
+    {
+        e.Cancel = true;
+        turnCts.Cancel();
+    }
+};
 
 while (true)
 {
@@ -97,10 +108,31 @@ while (true)
         continue;
     }
 
-    Console.Write("\nClaude: ");
-    await foreach (string delta in chat.SendAsync(input.Trim()))
-        Console.Write(delta);
-    Console.WriteLine();
+    turnCts = new CancellationTokenSource();
+    try
+    {
+        Console.Write("\nClaude: ");
+        await foreach (string delta in chat.SendAsync(input.Trim(), turnCts.Token))
+            Console.Write(delta);
+        Console.WriteLine();
+
+        if (chat.LastTurnUsage is { } usage)
+            Console.WriteLine($"[tokens: {usage}]");
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine("\n[cancelled]");
+    }
+    catch (Anthropic.Exceptions.AnthropicException ex)
+    {
+        Console.WriteLine();
+        Console.Error.WriteLine($"[error] {ex.Message}");
+    }
+    finally
+    {
+        turnCts.Dispose();
+        turnCts = null;
+    }
 }
 
 Console.WriteLine("\nGoodbye!");

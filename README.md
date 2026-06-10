@@ -46,7 +46,10 @@ $env:NUGET_PACKAGES = "C:\NuGetPackages"
 dotnet run --project src/ChatBot
 ```
 
-Type messages at the `You:` prompt. The reply streams in under `Claude:`.
+Type messages at the `You:` prompt. The reply streams in under `Claude:`, and a
+`[tokens: …]` line reports usage after each turn. Press **Ctrl-C** while a reply is
+streaming to cancel just that reply (the app keeps running); press it at the prompt
+to exit. API errors are reported inline (`[error] …`) without crashing.
 
 ### In-chat commands
 
@@ -54,6 +57,7 @@ Type messages at the `You:` prompt. The reply streams in under `Claude:`.
 | --------------- | ---------------------------------------- |
 | `exit` / `quit` | End the session                          |
 | `clear`         | Wipe the saved conversation history      |
+| `Ctrl-C`        | Cancel the streaming reply (or exit at the prompt) |
 
 ## Configuration
 
@@ -67,6 +71,11 @@ order of precedence:
 
 > **Note:** `ANTHROPIC_API_KEY` is separate from this stack — it is always read
 > directly from the environment (see Setup) and is never put in `appsettings.json`.
+
+Logging is configured from the `Logging` section (standard .NET levels) and writes
+to **stderr**, so it never interleaves with the streamed reply on stdout. The default
+level is `Warning`, keeping normal runs quiet; raise it (e.g. `ChatBot`/`Default` to
+`Information`) to see per-turn request/usage logs.
 
 | Flag              | Argument | Config key / env var          | Default              | Description |
 | ----------------- | -------- | ----------------------------- | -------------------- | ----------- |
@@ -119,10 +128,24 @@ deleting the file) starts fresh.
 | `src/ChatBot/StreamingChatService.cs`     | Streaming engine (token-by-token + count-based trim) |
 | `src/ChatBot/CompactionChatService.cs`    | Beta server-side compaction engine             |
 | `src/ChatBot/ChatServiceFactory.cs`       | Picks the engine from options; resolves the system prompt |
+| `src/ChatBot/HistoryTrimmer.cs`           | Pure context-window trim (unit-tested)         |
+| `src/ChatBot/TokenUsage.cs`               | Per-turn token counts                          |
 | `src/ChatBot/ChatOptions.cs`              | Strongly-typed settings (the `ChatBot` section) |
 | `src/ChatBot/ServiceCollectionExtensions.cs` | `AddChatBot` DI registration                |
 | `src/ChatBot/StoredTurn.cs`               | One persisted conversation turn (role + text)  |
 | `src/ChatBot/IConversationStore.cs`       | Persistence abstraction (file/SQLite/DB)       |
 | `src/ChatBot/FileConversationStore.cs`    | JSON-file implementation of the store          |
 | `src/ChatBot/appsettings.json`            | Default configuration values                   |
+| `tests/ChatBot.Tests/`                    | xUnit unit tests                               |
 | `docs/feature-plan.md`                    | Feature plan and implementation notes          |
+
+## Tests
+
+```powershell
+$env:NUGET_PACKAGES = "C:\NuGetPackages"
+dotnet test
+```
+
+The tests cover the network-independent logic — history trimming, system-prompt
+resolution, the file store (round-trip/corrupt/clear), and engine option clamping
+and history seeding.

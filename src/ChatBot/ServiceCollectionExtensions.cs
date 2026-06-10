@@ -1,6 +1,7 @@
 using Anthropic;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace ChatBot;
 
@@ -15,6 +16,18 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddChatBot(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<ChatOptions>(config.GetSection(ChatOptions.SectionName));
+
+        // Logging is configured from the "Logging" section; default level keeps the
+        // console clean during chat (warnings/errors still surface). Writes to stderr
+        // so log lines don't interleave with the streamed reply on stdout.
+        services.AddLogging(builder =>
+        {
+            builder.AddConfiguration(config.GetSection("Logging"));
+            builder.AddSimpleConsole(options => options.SingleLine = true);
+            // Route log output to stderr so it never interleaves with the reply on stdout.
+            builder.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(
+                options => options.LogToStandardErrorThreshold = LogLevel.Trace);
+        });
 
         services.AddSingleton(_ =>
         {
