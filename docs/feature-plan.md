@@ -136,7 +136,15 @@ First step: **dependency injection + configuration** (foundation for packaging t
 - `IConversationStore` abstracts persistence; `FileConversationStore` is the JSON-file implementation, registered via `AddChatBot` (path from `ChatOptions.HistoryPath`).
 - The engine owns load/save/clear through the store; the host only drives the resume prompt. Swapping in SQLite/DB is now a new implementation + DI registration.
 
+### Production concerns
+- **Logging:** `ILogger` via DI (configured from the `Logging` section, written to stderr so it never mixes with the reply); the file store logs failures instead of writing to `Console.Error`.
+- **Token usage:** `IChatService.LastTurnUsage` (`TokenUsage`) is captured from the stream/response and printed per turn.
+- **Cancellation:** `SendAsync` honors a `CancellationToken`; Ctrl-C cancels the in-progress reply (per-turn `CancellationTokenSource`) without exiting the app.
+- **Graceful errors:** API exceptions are caught in the host loop and reported inline (`[error] …`) rather than crashing.
+- **Tests:** `tests/ChatBot.Tests` (xUnit) covers `HistoryTrimmer`, system-prompt resolution, `FileConversationStore`, and engine option-clamping/seeding. Trimming was extracted to `HistoryTrimmer` and turns are committed only on a successful turn, both of which made the engine testable.
+
 ## Out of Scope (future)
 
-- Production concerns: `ILogger`, token/cost tracking, graceful error handling, Ctrl-C cancellation wired to the host, and unit tests.
+- Dollar-cost computation (needs a maintained price table); token counts are exposed so callers can derive it.
 - CLI streaming within compaction mode (would need beta streaming + compaction-block accumulation).
+- Additional `IConversationStore` backends (SQLite/DB) and broader engine tests via an SDK seam/mock.

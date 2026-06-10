@@ -2,4 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/ChatBot/ChatBot.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ChatBot.Tests/ChatBot.Tests.csproj" />
+  </Folder>
 </Solution>

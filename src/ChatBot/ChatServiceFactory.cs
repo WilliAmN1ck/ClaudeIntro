@@ -1,4 +1,5 @@
 using Anthropic;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace ChatBot;
@@ -21,20 +22,25 @@ public sealed class ChatServiceFactory : IChatServiceFactory
     private readonly AnthropicClient _client;
     private readonly ChatOptions _options;
     private readonly IConversationStore _store;
+    private readonly ILoggerFactory _loggerFactory;
 
-    public ChatServiceFactory(AnthropicClient client, IOptions<ChatOptions> options, IConversationStore store)
+    public ChatServiceFactory(
+        AnthropicClient client, IOptions<ChatOptions> options, IConversationStore store, ILoggerFactory loggerFactory)
     {
         _client = client;
         _options = options.Value;
         _store = store;
+        _loggerFactory = loggerFactory;
     }
 
     public IChatService Create()
     {
         string systemPrompt = ResolveSystemPrompt(_options);
         return _options.Compaction
-            ? new CompactionChatService(_client, _options, systemPrompt, _store)
-            : new StreamingChatService(_client, _options, systemPrompt, _store);
+            ? new CompactionChatService(_client, _options, systemPrompt, _store,
+                _loggerFactory.CreateLogger<CompactionChatService>())
+            : new StreamingChatService(_client, _options, systemPrompt, _store,
+                _loggerFactory.CreateLogger<StreamingChatService>());
     }
 
     /// <summary>

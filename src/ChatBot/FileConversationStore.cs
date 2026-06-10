@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace ChatBot;
@@ -11,9 +12,11 @@ public sealed class FileConversationStore : IConversationStore
 {
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
     private readonly string _path;
+    private readonly ILogger<FileConversationStore> _logger;
 
-    public FileConversationStore(IOptions<ChatOptions> options)
+    public FileConversationStore(IOptions<ChatOptions> options, ILogger<FileConversationStore> logger)
     {
+        _logger = logger;
         string? configured = options.Value.HistoryPath;
         _path = string.IsNullOrWhiteSpace(configured) ? DefaultPath : configured;
     }
@@ -45,6 +48,7 @@ public sealed class FileConversationStore : IConversationStore
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
             // Corrupt or unreadable history — start fresh rather than crash.
+            _logger.LogWarning(ex, "Could not load history from {Path}; starting fresh", _path);
             return new List<StoredTurn>();
         }
     }
@@ -61,7 +65,7 @@ public sealed class FileConversationStore : IConversationStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Console.Error.WriteLine($"Warning: could not save history: {ex.Message}");
+            _logger.LogWarning(ex, "Could not save history to {Path}", _path);
         }
     }
 
@@ -74,7 +78,7 @@ public sealed class FileConversationStore : IConversationStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Console.Error.WriteLine($"Warning: could not clear history: {ex.Message}");
+            _logger.LogWarning(ex, "Could not clear history at {Path}", _path);
         }
     }
 }

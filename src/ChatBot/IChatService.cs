@@ -19,6 +19,9 @@ public interface IChatService
     /// <summary>The conversation so far, as plain role/text turns (for persistence/inspection).</summary>
     IReadOnlyList<StoredTurn> History { get; }
 
+    /// <summary>Token usage reported for the most recent completed turn, if any.</summary>
+    TokenUsage? LastTurnUsage { get; }
+
     /// <summary>
     /// Sends a user message and streams the assistant reply as text chunks.
     /// The user and (accumulated) assistant turns are appended to <see cref="History"/>.

@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using Anthropic;
 using Anthropic.Models.Beta.Messages;
+using Microsoft.Extensions.Logging;
 
 namespace ChatBot;
 
@@ -15,6 +16,7 @@ public sealed class CompactionChatService : IChatService
 {
     private readonly AnthropicClient _client;
     private readonly IConversationStore _store;
+    private readonly ILogger<CompactionChatService> _logger;
     private readonly string _system;
     private readonly List<BetaMessageParam> _betaHistory = new();
     private readonly List<StoredTurn> _turns = new();
@@ -23,12 +25,18 @@ public sealed class CompactionChatService : IChatService
     public long MaxTokens { get; }
     public string SystemPrompt { get; }
     public IReadOnlyList<StoredTurn> History => _turns;
+    public TokenUsage? LastTurnUsage { get; private set; }
 
     public CompactionChatService(
-        AnthropicClient client, ChatOptions options, string systemPrompt, IConversationStore store)
+        AnthropicClient client,
+        ChatOptions options,
+        string systemPrompt,
+        IConversationStore store,
+        ILogger<CompactionChatService> logger)
     {
         _client = client;
         _store = store;
+        _logger = logger;
         Model = string.IsNullOrWhiteSpace(options.Model) ? "claude-opus-4-8" : options.Model.Trim();
         MaxTokens = options.MaxTokens >= 1 ? options.MaxTokens : 4096;
         _system = systemPrompt;
@@ -54,8 +62,8 @@ public sealed class CompactionChatService : IChatService
     public async IAsyncEnumerable<string> SendAsync(
         string userMessage, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        _turns.Add(new StoredTurn("user", userMessage));
-        _betaHistory.Add(new BetaMessageParam { Role = Role.User, Content = userMessage });
+        var userMsg = new BetaMessageParam { Role = Role.User, Content = userMessage };
+        var requestMessages = new List<BetaMessageParam>(_betaHistory) { userMsg };
 
         var parameters = new MessageCreateParams
         {
@@ -67,8 +75,10 @@ public sealed class CompactionChatService : IChatService
             {
                 Edits = [new BetaCompact20260112Edit()],
             },
-            Messages = _betaHistory,
+            Messages = requestMessages,
         };
+
+        _logger.LogInformation("Compaction request: {MessageCount} message(s) in context", requestMessages.Count);
 
         BetaMessage response = await _client.Beta.Messages.Create(parameters, cancellationToken);
 
@@ -89,11 +99,23 @@ public sealed class CompactionChatService : IChatService
             }
         }
 
+        // Commit only on success.
+        _betaHistory.Add(userMsg);
         _betaHistory.Add(new BetaMessageParam { Role = Role.Assistant, Content = blocks });
 
         string reply = text.ToString();
+        _turns.Add(new StoredTurn("user", userMessage));
         _turns.Add(new StoredTurn("assistant", reply));
+
+        LastTurnUsage = new TokenUsage(
+            response.Usage.InputTokens,
+            response.Usage.OutputTokens,
+            response.Usage.CacheReadInputTokens ?? 0,
+            response.Usage.CacheCreationInputTokens ?? 0);
+
         _store.Save(_turns);
+        _logger.LogInformation("Turn complete: {Usage}", LastTurnUsage);
+
         yield return reply;
     }
 }
