@@ -30,7 +30,13 @@ public static class ServiceCollectionExtensions
             return new AnthropicClient { ApiKey = apiKey };
         });
 
-        services.AddSingleton<IConversationStore, FileConversationStore>();
+        // Select the persistence backend from configuration (default: file).
+        string? store = config.GetSection(ChatOptions.SectionName)["Store"];
+        if (string.Equals(store, "postgres", StringComparison.OrdinalIgnoreCase))
+            services.AddSingleton<IConversationStore, PostgresConversationStore>();
+        else
+            services.AddSingleton<IConversationStore, FileConversationStore>();
+
         services.AddSingleton<IChatServiceFactory, ChatServiceFactory>();
 
         return services;

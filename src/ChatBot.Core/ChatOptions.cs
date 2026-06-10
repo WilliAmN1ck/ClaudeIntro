@@ -23,8 +23,17 @@ public sealed class ChatOptions
     /// <summary>Path to a file whose contents become the system prompt.</summary>
     public string? SystemPromptFile { get; set; }
 
-    /// <summary>Where the conversation is saved/loaded; defaults to the app-data history file.</summary>
+    /// <summary>Where the conversation is saved/loaded (file store); defaults to the app-data history file.</summary>
     public string? HistoryPath { get; set; }
+
+    /// <summary>Conversation store backend: <c>file</c> (default) or <c>postgres</c>.</summary>
+    public string Store { get; set; } = "file";
+
+    /// <summary>Npgsql connection string, required when <see cref="Store"/> is <c>postgres</c>.</summary>
+    public string? PostgresConnectionString { get; set; }
+
+    /// <summary>Conversation id used as the row key in the Postgres store.</summary>
+    public string ConversationId { get; set; } = "default";
 
     /// <summary>Use beta server-side compaction instead of the count-based history trim.</summary>
     public bool Compaction { get; set; }
