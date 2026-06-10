@@ -1,6 +1,8 @@
 using ChatBot;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 
 if (args.Contains("-h") || args.Contains("--help"))
@@ -34,6 +36,14 @@ IConfiguration config = new ConfigurationBuilder()
     .Build();
 
 using ServiceProvider provider = new ServiceCollection()
+    .AddLogging(builder =>
+    {
+        // Console logging is a host concern. Default level (Warning) keeps chat clean;
+        // output goes to stderr so it never interleaves with the reply on stdout.
+        builder.AddConfiguration(config.GetSection("Logging"));
+        builder.AddSimpleConsole(o => o.SingleLine = true);
+        builder.Services.Configure<ConsoleLoggerOptions>(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
+    })
     .AddChatBot(config)
     .BuildServiceProvider();
 

@@ -120,24 +120,29 @@ deleting the file) starts fresh.
 
 ## Project layout
 
-| Path                                      | Purpose                                        |
-| ----------------------------------------- | ---------------------------------------------- |
-| `ClaudeIntro.slnx`                        | Solution file                                  |
-| `src/ChatBot/Program.cs`                  | Thin console host: builds config + DI, drives the engine |
-| `src/ChatBot/IChatService.cs`             | Console-agnostic chat engine interface         |
-| `src/ChatBot/StreamingChatService.cs`     | Streaming engine (token-by-token + count-based trim) |
-| `src/ChatBot/CompactionChatService.cs`    | Beta server-side compaction engine             |
-| `src/ChatBot/ChatServiceFactory.cs`       | Picks the engine from options; resolves the system prompt |
-| `src/ChatBot/HistoryTrimmer.cs`           | Pure context-window trim (unit-tested)         |
-| `src/ChatBot/TokenUsage.cs`               | Per-turn token counts                          |
-| `src/ChatBot/ChatOptions.cs`              | Strongly-typed settings (the `ChatBot` section) |
-| `src/ChatBot/ServiceCollectionExtensions.cs` | `AddChatBot` DI registration                |
-| `src/ChatBot/StoredTurn.cs`               | One persisted conversation turn (role + text)  |
-| `src/ChatBot/IConversationStore.cs`       | Persistence abstraction (file/SQLite/DB)       |
-| `src/ChatBot/FileConversationStore.cs`    | JSON-file implementation of the store          |
-| `src/ChatBot/appsettings.json`            | Default configuration values                   |
-| `tests/ChatBot.Tests/`                    | xUnit unit tests                               |
-| `docs/feature-plan.md`                    | Feature plan and implementation notes          |
+The engine lives in a reusable class library (`ChatBot.Core`); `ChatBot` is a thin
+console host that references it.
+
+| Path                                          | Purpose                                        |
+| --------------------------------------------- | ---------------------------------------------- |
+| `ClaudeIntro.slnx`                            | Solution file                                  |
+| `src/ChatBot/` (host)                         | Console app: builds config + DI + logging, drives the engine |
+| &nbsp;&nbsp;`Program.cs`                       | Entry point and chat loop                      |
+| &nbsp;&nbsp;`appsettings.json`                | Default configuration values                   |
+| `src/ChatBot.Core/` (library)                 | The reusable chat engine                       |
+| &nbsp;&nbsp;`IChatService.cs`                 | Console-agnostic chat engine interface         |
+| &nbsp;&nbsp;`StreamingChatService.cs`         | Streaming engine (token-by-token + count-based trim) |
+| &nbsp;&nbsp;`CompactionChatService.cs`        | Beta server-side compaction engine             |
+| &nbsp;&nbsp;`ChatServiceFactory.cs`           | Picks the engine from options; resolves the system prompt |
+| &nbsp;&nbsp;`HistoryTrimmer.cs`               | Pure context-window trim (unit-tested)         |
+| &nbsp;&nbsp;`TokenUsage.cs`                    | Per-turn token counts                          |
+| &nbsp;&nbsp;`ChatOptions.cs`                  | Strongly-typed settings (the `ChatBot` section) |
+| &nbsp;&nbsp;`ServiceCollectionExtensions.cs`  | `AddChatBot` DI registration                   |
+| &nbsp;&nbsp;`StoredTurn.cs`                    | One persisted conversation turn (role + text)  |
+| &nbsp;&nbsp;`IConversationStore.cs`           | Persistence abstraction (file/SQLite/DB)       |
+| &nbsp;&nbsp;`FileConversationStore.cs`        | JSON-file implementation of the store          |
+| `tests/ChatBot.Tests/`                        | xUnit unit tests (reference `ChatBot.Core`)    |
+| `docs/feature-plan.md`                        | Feature plan and implementation notes          |
 
 ## Tests
 
@@ -149,3 +154,23 @@ dotnet test
 The tests cover the network-independent logic — history trimming, system-prompt
 resolution, the file store (round-trip/corrupt/clear), and engine option clamping
 and history seeding.
+
+## Reusing the engine
+
+Another app (web API, GUI, service) can consume `ChatBot.Core` directly. Register
+the services and create an engine:
+
+```csharp
+var services = new ServiceCollection();
+services.AddLogging(b => b.AddConsole());   // the host supplies logging
+services.AddChatBot(configuration);          // binds ChatOptions, registers the client/store/factory
+var provider = services.BuildServiceProvider();
+
+IChatService chat = provider.GetRequiredService<IChatServiceFactory>().Create();
+await foreach (string delta in chat.SendAsync("Hello"))
+    Console.Write(delta);
+```
+
+`AddChatBot` deliberately does **not** configure logging — the consumer brings its
+own providers. Swap persistence by registering a different `IConversationStore`
+before `AddChatBot` (or after, to override).
