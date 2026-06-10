@@ -121,6 +121,8 @@ deleting the file) starts fresh.
 | `src/ChatBot/ChatServiceFactory.cs`       | Picks the engine from options; resolves the system prompt |
 | `src/ChatBot/ChatOptions.cs`              | Strongly-typed settings (the `ChatBot` section) |
 | `src/ChatBot/ServiceCollectionExtensions.cs` | `AddChatBot` DI registration                |
-| `src/ChatBot/ConversationStore.cs`        | JSON load/save of conversation history         |
+| `src/ChatBot/StoredTurn.cs`               | One persisted conversation turn (role + text)  |
+| `src/ChatBot/IConversationStore.cs`       | Persistence abstraction (file/SQLite/DB)       |
+| `src/ChatBot/FileConversationStore.cs`    | JSON-file implementation of the store          |
 | `src/ChatBot/appsettings.json`            | Default configuration values                   |
 | `docs/feature-plan.md`                    | Feature plan and implementation notes          |

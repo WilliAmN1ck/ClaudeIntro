@@ -12,6 +12,7 @@ namespace ChatBot;
 public sealed class StreamingChatService : IChatService
 {
     private readonly AnthropicClient _client;
+    private readonly IConversationStore _store;
     private readonly int _maxHistoryMessages;
     private readonly List<TextBlockParam> _systemBlocks;
     private readonly List<StoredTurn> _turns = new();
@@ -22,9 +23,10 @@ public sealed class StreamingChatService : IChatService
     public IReadOnlyList<StoredTurn> History => _turns;
 
     public StreamingChatService(
-        AnthropicClient client, ChatOptions options, string systemPrompt, IEnumerable<StoredTurn> seed)
+        AnthropicClient client, ChatOptions options, string systemPrompt, IConversationStore store)
     {
         _client = client;
+        _store = store;
         Model = string.IsNullOrWhiteSpace(options.Model) ? "claude-opus-4-8" : options.Model.Trim();
         MaxTokens = options.MaxTokens >= 1 ? options.MaxTokens : 4096;
         _maxHistoryMessages = options.MaxHistoryMessages >= 0 ? options.MaxHistoryMessages : 40;
@@ -36,10 +38,14 @@ public sealed class StreamingChatService : IChatService
             new() { Text = systemPrompt, CacheControl = new CacheControlEphemeral() },
         };
 
-        _turns.AddRange(seed);
+        _turns.AddRange(store.Load());
     }
 
-    public void Clear() => _turns.Clear();
+    public void Clear()
+    {
+        _turns.Clear();
+        _store.Clear();
+    }
 
     public async IAsyncEnumerable<string> SendAsync(
         string userMessage, [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -67,6 +73,7 @@ public sealed class StreamingChatService : IChatService
         }
 
         _turns.Add(new StoredTurn("assistant", reply.ToString()));
+        _store.Save(_turns);
     }
 
     // Builds the SDK message list from the text turns, keeping only the most recent

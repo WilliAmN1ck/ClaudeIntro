@@ -132,8 +132,11 @@ First step: **dependency injection + configuration** (foundation for packaging t
 - `StreamingChatService` and `CompactionChatService` implement it; `ChatServiceFactory` (registered via `AddChatBot`) picks one from options and resolves the system prompt.
 - `Program.cs` is now a thin host: it owns the resume prompt, I/O, and persistence; the engine owns conversation state.
 
+### Pluggable persistence
+- `IConversationStore` abstracts persistence; `FileConversationStore` is the JSON-file implementation, registered via `AddChatBot` (path from `ChatOptions.HistoryPath`).
+- The engine owns load/save/clear through the store; the host only drives the resume prompt. Swapping in SQLite/DB is now a new implementation + DI registration.
+
 ## Out of Scope (future)
 
-- Abstract persistence behind an `IConversationStore` interface (file/SQLite/DB) — next step.
 - Production concerns: `ILogger`, token/cost tracking, graceful error handling, Ctrl-C cancellation wired to the host, and unit tests.
 - CLI streaming within compaction mode (would need beta streaming + compaction-block accumulation).
