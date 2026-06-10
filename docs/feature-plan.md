@@ -127,7 +127,13 @@ First step: **dependency injection + configuration** (foundation for packaging t
 - `ServiceCollectionExtensions.AddChatBot(IServiceCollection, IConfiguration)` registers options + `AnthropicClient` — the idiomatic consumer entry point.
 - Settings load from `appsettings.json` → environment variables (`ChatBot__*`) → CLI flags (each overrides the previous). `ANTHROPIC_API_KEY` is read directly from the environment.
 
+### Console-agnostic engine (foundation)
+- `IChatService` is the reusable engine: `SendAsync` returns `IAsyncEnumerable<string>` (streamed text) plus a `CancellationToken`, and exposes `History`/`Model`/`MaxTokens`/`SystemPrompt`/`Clear()`. No `Console` calls inside.
+- `StreamingChatService` and `CompactionChatService` implement it; `ChatServiceFactory` (registered via `AddChatBot`) picks one from options and resolves the system prompt.
+- `Program.cs` is now a thin host: it owns the resume prompt, I/O, and persistence; the engine owns conversation state.
+
 ## Out of Scope (future)
 
-- Extract the chat loop into a console-agnostic `ChatSession`/`IChatService` engine (the next step toward a NuGet library).
+- Abstract persistence behind an `IConversationStore` interface (file/SQLite/DB) — next step.
+- Production concerns: `ILogger`, token/cost tracking, graceful error handling, Ctrl-C cancellation wired to the host, and unit tests.
 - CLI streaming within compaction mode (would need beta streaming + compaction-block accumulation).

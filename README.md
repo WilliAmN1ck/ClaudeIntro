@@ -114,10 +114,13 @@ deleting the file) starts fresh.
 | Path                                      | Purpose                                        |
 | ----------------------------------------- | ---------------------------------------------- |
 | `ClaudeIntro.slnx`                        | Solution file                                  |
-| `src/ChatBot/Program.cs`                  | Entry point: builds config + DI, runs chat loop |
+| `src/ChatBot/Program.cs`                  | Thin console host: builds config + DI, drives the engine |
+| `src/ChatBot/IChatService.cs`             | Console-agnostic chat engine interface         |
+| `src/ChatBot/StreamingChatService.cs`     | Streaming engine (token-by-token + count-based trim) |
+| `src/ChatBot/CompactionChatService.cs`    | Beta server-side compaction engine             |
+| `src/ChatBot/ChatServiceFactory.cs`       | Picks the engine from options; resolves the system prompt |
 | `src/ChatBot/ChatOptions.cs`              | Strongly-typed settings (the `ChatBot` section) |
 | `src/ChatBot/ServiceCollectionExtensions.cs` | `AddChatBot` DI registration                |
 | `src/ChatBot/ConversationStore.cs`        | JSON load/save of conversation history         |
-| `src/ChatBot/CompactionChat.cs`           | Beta server-side compaction backend            |
 | `src/ChatBot/appsettings.json`            | Default configuration values                   |
 | `docs/feature-plan.md`                    | Feature plan and implementation notes          |
