@@ -1,35 +1,63 @@
 using Anthropic;
 using Anthropic.Models.Messages;
 using ChatBot;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
-// CLI flags override env vars, which override built-in defaults.
-Dictionary<string, string?> cli = ParseArgs(args);
-
-if (cli.ContainsKey("help") || cli.ContainsKey("h"))
+if (args.Contains("-h") || args.Contains("--help"))
 {
     PrintUsage();
     return 0;
 }
 
-string? apiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
-if (string.IsNullOrWhiteSpace(apiKey))
+// Configuration precedence (low → high): appsettings.json → env vars → CLI flags.
+var switchMappings = new Dictionary<string, string>
 {
-    Console.Error.WriteLine("Error: ANTHROPIC_API_KEY environment variable is not set.");
+    ["--model"] = "ChatBot:Model",
+    ["--max-tokens"] = "ChatBot:MaxTokens",
+    ["--max-history"] = "ChatBot:MaxHistoryMessages",
+    ["--system"] = "ChatBot:SystemPrompt",
+    ["--system-file"] = "ChatBot:SystemPromptFile",
+    ["--history"] = "ChatBot:HistoryPath",
+};
+
+// The command-line config provider can't express bare flags, so map --compaction manually.
+var flagOverrides = new Dictionary<string, string?>();
+if (args.Contains("--compaction"))
+    flagOverrides["ChatBot:Compaction"] = "true";
+
+IConfiguration config = new ConfigurationBuilder()
+    .SetBasePath(AppContext.BaseDirectory)
+    .AddJsonFile("appsettings.json", optional: true)
+    .AddEnvironmentVariables()
+    .AddCommandLine(args, switchMappings)
+    .AddInMemoryCollection(flagOverrides)
+    .Build();
+
+using ServiceProvider provider = new ServiceCollection()
+    .AddChatBot(config)
+    .BuildServiceProvider();
+
+ChatOptions options = provider.GetRequiredService<IOptions<ChatOptions>>().Value;
+
+AnthropicClient client;
+try
+{
+    client = provider.GetRequiredService<AnthropicClient>();
+}
+catch (InvalidOperationException ex)
+{
+    Console.Error.WriteLine($"Error: {ex.Message}");
     return 1;
 }
 
-AnthropicClient client = new() { ApiKey = apiKey };
-
 const string defaultSystemPrompt = "You are a helpful, concise assistant.";
-string systemPrompt = ResolveSystemPrompt(defaultSystemPrompt, cli);
+string systemPrompt = ResolveSystemPrompt(defaultSystemPrompt, options);
 
-// Configurable model and output cap. Precedence: CLI flag > env var > default.
-string modelId = Setting(cli, "model", "ANTHROPIC_MODEL") ?? "claude-opus-4-8";
-long maxTokens = SettingLong(cli, "max-tokens", "ANTHROPIC_MAX_TOKENS", 4096, min: 1);
-
-// Context-window management: cap how many recent messages are sent per request.
-// 0 means "no cap — send the whole history".
-int maxHistoryMessages = (int)SettingLong(cli, "max-history", "ANTHROPIC_MAX_HISTORY_MESSAGES", 40, min: 0);
+string modelId = string.IsNullOrWhiteSpace(options.Model) ? "claude-opus-4-8" : options.Model.Trim();
+long maxTokens = options.MaxTokens >= 1 ? options.MaxTokens : 4096;
+int maxHistoryMessages = options.MaxHistoryMessages >= 0 ? options.MaxHistoryMessages : 40;
 
 // Cache the system prompt so repeated requests reuse its prefix (cheaper, faster).
 var systemBlocks = new List<TextBlockParam>
@@ -37,8 +65,9 @@ var systemBlocks = new List<TextBlockParam>
     new() { Text = systemPrompt, CacheControl = new CacheControlEphemeral() },
 };
 
-string historyPath = Setting(cli, "history", "ANTHROPIC_HISTORY_FILE")
-                     ?? ConversationStore.DefaultPath;
+string historyPath = string.IsNullOrWhiteSpace(options.HistoryPath)
+    ? ConversationStore.DefaultPath
+    : options.HistoryPath;
 
 // `turns` is the persistence source of truth; `history` is the SDK view sent on each request.
 var turns = new List<StoredTurn>();
@@ -63,9 +92,7 @@ var history = turns.Select(t => t.ToMessage()).ToList();
 
 // Compaction mode (beta) lets the API summarize old turns server-side instead of
 // the simple count-based trim. It is non-streaming and uses the beta endpoint.
-bool useCompaction = cli.ContainsKey("compaction")
-    || Environment.GetEnvironmentVariable("ANTHROPIC_COMPACTION") is "1"
-    || string.Equals(Environment.GetEnvironmentVariable("ANTHROPIC_COMPACTION"), "true", StringComparison.OrdinalIgnoreCase);
+bool useCompaction = options.Compaction;
 
 // Each backend owns its own conversation history and prints its own reply text;
 // the outer loop just handles input, commands, and text persistence.
@@ -152,79 +179,20 @@ while (true)
 Console.WriteLine("\nGoodbye!");
 return 0;
 
-// Resolves the system prompt with the following precedence:
-//   1. --system <text>             — inline prompt on the command line
-//   2. --system-file <path>        — file path on the command line
-//   3. ANTHROPIC_SYSTEM_PROMPT_FILE — path to a file holding the prompt
-//   4. ANTHROPIC_SYSTEM_PROMPT      — the prompt text directly
-//   5. the supplied default
-static string ResolveSystemPrompt(string fallback, Dictionary<string, string?> cli)
+// Resolves the system prompt: inline value, then file contents, then the default.
+static string ResolveSystemPrompt(string fallback, ChatOptions options)
 {
-    if (cli.TryGetValue("system", out string? cliInline) && !string.IsNullOrWhiteSpace(cliInline))
-        return cliInline.Trim();
+    if (!string.IsNullOrWhiteSpace(options.SystemPrompt))
+        return options.SystemPrompt.Trim();
 
-    string? cliFile = cli.TryGetValue("system-file", out string? cf) ? cf : null;
-    string? envFile = Environment.GetEnvironmentVariable("ANTHROPIC_SYSTEM_PROMPT_FILE");
-    foreach (string? file in new[] { cliFile, envFile })
+    if (!string.IsNullOrWhiteSpace(options.SystemPromptFile) && File.Exists(options.SystemPromptFile))
     {
-        if (!string.IsNullOrWhiteSpace(file) && File.Exists(file))
-        {
-            string fromFile = File.ReadAllText(file).Trim();
-            if (!string.IsNullOrWhiteSpace(fromFile))
-                return fromFile;
-        }
+        string fromFile = File.ReadAllText(options.SystemPromptFile).Trim();
+        if (!string.IsNullOrWhiteSpace(fromFile))
+            return fromFile;
     }
-
-    string? inline = Environment.GetEnvironmentVariable("ANTHROPIC_SYSTEM_PROMPT");
-    if (!string.IsNullOrWhiteSpace(inline))
-        return inline.Trim();
 
     return fallback;
-}
-
-// Returns a string setting by CLI flag, then env var, else null (trimmed, non-empty).
-static string? Setting(Dictionary<string, string?> cli, string flag, string envVar)
-{
-    if (cli.TryGetValue(flag, out string? v) && !string.IsNullOrWhiteSpace(v))
-        return v.Trim();
-    string? env = Environment.GetEnvironmentVariable(envVar);
-    return string.IsNullOrWhiteSpace(env) ? null : env.Trim();
-}
-
-// Returns a long setting (>= min) by CLI flag, then env var, else the fallback.
-static long SettingLong(Dictionary<string, string?> cli, string flag, string envVar, long fallback, long min)
-{
-    string? raw = Setting(cli, flag, envVar);
-    return long.TryParse(raw, out long value) && value >= min ? value : fallback;
-}
-
-// Parses "--key value", "--key=value", and bare "--flag" (value null) into a map.
-// Keys are lowercased and stripped of leading dashes.
-static Dictionary<string, string?> ParseArgs(string[] args)
-{
-    var map = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-    for (int i = 0; i < args.Length; i++)
-    {
-        string arg = args[i];
-        if (!arg.StartsWith('-'))
-            continue;
-
-        string key = arg.TrimStart('-');
-        int eq = key.IndexOf('=');
-        if (eq >= 0)
-        {
-            map[key[..eq]] = key[(eq + 1)..];
-        }
-        else if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
-        {
-            map[key] = args[++i];
-        }
-        else
-        {
-            map[key] = null; // bare flag
-        }
-    }
-    return map;
 }
 
 static void PrintUsage()
@@ -234,15 +202,18 @@ static void PrintUsage()
 
         Usage: dotnet run --project src/ChatBot -- [options]
 
-        Options (CLI flags override env vars, which override defaults):
-          --model <id>           Model id            (env ANTHROPIC_MODEL, default claude-opus-4-8)
-          --max-tokens <n>       Max output tokens   (env ANTHROPIC_MAX_TOKENS, default 4096)
-          --max-history <n>      Recent-message cap  (env ANTHROPIC_MAX_HISTORY_MESSAGES, default 40; 0 = unlimited)
-          --system <text>        System prompt text  (env ANTHROPIC_SYSTEM_PROMPT)
-          --system-file <path>   System prompt file  (env ANTHROPIC_SYSTEM_PROMPT_FILE)
-          --history <path>       History file path   (env ANTHROPIC_HISTORY_FILE)
+        Settings load from appsettings.json, then environment variables, then the
+        CLI flags below (each source overrides the previous). Env-var form is the
+        config key with '__', e.g. ChatBot__Model.
+
+          --model <id>           Model id            (ChatBot__Model, default claude-opus-4-8)
+          --max-tokens <n>       Max output tokens   (ChatBot__MaxTokens, default 4096)
+          --max-history <n>      Recent-message cap  (ChatBot__MaxHistoryMessages, default 40; 0 = unlimited)
+          --system <text>        System prompt text  (ChatBot__SystemPrompt)
+          --system-file <path>   System prompt file  (ChatBot__SystemPromptFile)
+          --history <path>       History file path   (ChatBot__HistoryPath)
           --compaction           Use server-side compaction instead of message-count trim
-                                 (beta; non-streaming; env ANTHROPIC_COMPACTION=1)
+                                 (beta; non-streaming; ChatBot__Compaction=true)
           -h, --help             Show this help and exit
 
         Requires the ANTHROPIC_API_KEY environment variable.
