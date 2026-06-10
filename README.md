@@ -1,5 +1,7 @@
 # ClaudeIntro
 
+[![CI](https://github.com/WilliAmN1ck/ClaudeIntro/actions/workflows/ci.yml/badge.svg)](https://github.com/WilliAmN1ck/ClaudeIntro/actions/workflows/ci.yml)
+
 A small multi-turn console chatbot built with **C# / .NET 10** and the official
 [Anthropic .NET SDK](https://www.nuget.org/packages/Anthropic). It streams
 Claude's replies token-by-token, persists conversations across runs, supports a
