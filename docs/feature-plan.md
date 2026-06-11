@@ -169,8 +169,13 @@ First step: **dependency injection + configuration** (foundation for packaging t
 - Tool dispatch and SDK tool-definition building moved to `ToolInvoker` (pure, unit-tested directly).
 - `StreamingChatService` now drives the loop over these seams, so the agentic flow (multi-iteration tool_use → tool_result → end_turn, usage summing, commit-on-success, unknown-tool recovery) is unit-tested without the network.
 
+### Async conversation store
+- `IConversationStore` is fully async (`ExistsAsync`/`LoadAsync`/`SaveAsync`/`ClearAsync`), so a database backend never blocks the calling thread — appropriate for a server/high-concurrency host. `FileConversationStore` uses async file I/O; `PostgresConversationStore` uses Npgsql's async APIs with lazy (once) table creation.
+- History loading moved out of the engine constructors into `IChatServiceFactory.CreateAsync`, which loads the seed and passes it in. `IChatService.Clear()` became `ClearAsync()`. The console host awaits these.
+- Postgres connection/credential failures surface on first use as a clean startup error (`InvalidOperationException`), caught by the host.
+
 ## Out of Scope (future)
 
 - Dollar-cost computation (needs a maintained price table); token counts are exposed so callers can derive it.
 - Tool use within compaction mode.
-- Async `IConversationStore` surface (for high-concurrency hosts) and multi-conversation management beyond the single `ConversationId` key.
+- Multi-conversation management beyond the single `ConversationId` key.

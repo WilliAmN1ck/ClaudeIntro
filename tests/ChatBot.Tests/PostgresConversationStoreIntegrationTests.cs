@@ -29,7 +29,7 @@ public class PostgresConversationStoreIntegrationTests
     }
 
     [SkippableFact]
-    public void Save_load_clear_round_trips()
+    public async Task Save_load_clear_round_trips()
     {
         Skip.If(string.IsNullOrWhiteSpace(ConnectionString), "CHATBOT_TEST_POSTGRES not set.");
 
@@ -37,24 +37,24 @@ public class PostgresConversationStoreIntegrationTests
         PostgresConversationStore store = NewStore(id);
         try
         {
-            Assert.False(store.Exists());
+            Assert.False(await store.ExistsAsync());
 
-            store.Save(new List<StoredTurn> { new("user", "hi"), new("assistant", "hello") });
+            await store.SaveAsync(new List<StoredTurn> { new("user", "hi"), new("assistant", "hello") });
 
-            Assert.True(store.Exists());
-            var loaded = store.Load();
+            Assert.True(await store.ExistsAsync());
+            var loaded = await store.LoadAsync();
             Assert.Equal(2, loaded.Count);
             Assert.Equal("user", loaded[0].Role);
             Assert.Equal("hello", loaded[1].Text);
 
             // Save replaces prior contents.
-            store.Save(new List<StoredTurn> { new("user", "again") });
-            Assert.Single(store.Load());
+            await store.SaveAsync(new List<StoredTurn> { new("user", "again") });
+            Assert.Single(await store.LoadAsync());
         }
         finally
         {
-            store.Clear();
-            Assert.False(store.Exists());
+            await store.ClearAsync();
+            Assert.False(await store.ExistsAsync());
         }
     }
 

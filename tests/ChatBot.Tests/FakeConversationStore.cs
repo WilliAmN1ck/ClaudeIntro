@@ -12,12 +12,21 @@ internal sealed class FakeConversationStore : IConversationStore
 
     public FakeConversationStore(IEnumerable<StoredTurn>? seed = null) => _data = seed?.ToList() ?? new();
 
-    public bool Exists() => _data.Count > 0;
-    public List<StoredTurn> Load() => new(_data);
-    public void Save(IEnumerable<StoredTurn> turns) => _data = turns.ToList();
-    public void Clear()
+    public Task<bool> ExistsAsync(CancellationToken cancellationToken = default) => Task.FromResult(_data.Count > 0);
+
+    public Task<List<StoredTurn>> LoadAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(new List<StoredTurn>(_data));
+
+    public Task SaveAsync(IEnumerable<StoredTurn> turns, CancellationToken cancellationToken = default)
+    {
+        _data = turns.ToList();
+        return Task.CompletedTask;
+    }
+
+    public Task ClearAsync(CancellationToken cancellationToken = default)
     {
         _data.Clear();
         Cleared = true;
+        return Task.CompletedTask;
     }
 }

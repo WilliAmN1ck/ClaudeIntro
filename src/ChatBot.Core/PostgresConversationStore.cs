@@ -8,14 +8,16 @@ namespace ChatBot;
 
 /// <summary>
 /// Stores the conversation in PostgreSQL as a single <c>jsonb</c> row keyed by
-/// <see cref="ChatOptions.ConversationId"/>. Uses Npgsql's synchronous APIs so it
-/// satisfies <see cref="IConversationStore"/> without changing the engine.
+/// <see cref="ChatOptions.ConversationId"/>. Uses Npgsql's async APIs so it never
+/// blocks the calling thread. The table is created on first use.
 /// </summary>
 public sealed class PostgresConversationStore : IConversationStore
 {
     private readonly string _connectionString;
     private readonly string _conversationId;
     private readonly ILogger<PostgresConversationStore> _logger;
+    private readonly SemaphoreSlim _initGate = new(1, 1);
+    private bool _initialized;
 
     public PostgresConversationStore(IOptions<ChatOptions> options, ILogger<PostgresConversationStore> logger)
     {
@@ -28,14 +30,24 @@ public sealed class PostgresConversationStore : IConversationStore
 
         _connectionString = o.PostgresConnectionString;
         _conversationId = string.IsNullOrWhiteSpace(o.ConversationId) ? "default" : o.ConversationId;
+    }
 
-        // Create the table up front. A connection/credential problem surfaces here as
-        // a clear startup error rather than silently producing empty history later.
+    // Creates the table once. A connection/credential problem surfaces here as a clear
+    // error (the host catches InvalidOperationException) rather than empty history later.
+    private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
+    {
+        if (_initialized)
+            return;
+
+        await _initGate.WaitAsync(cancellationToken);
         try
         {
-            using var conn = new NpgsqlConnection(_connectionString);
-            conn.Open();
-            using var cmd = new NpgsqlCommand(
+            if (_initialized)
+                return;
+
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync(cancellationToken);
+            await using var cmd = new NpgsqlCommand(
                 """
                 CREATE TABLE IF NOT EXISTS conversations (
                     id text PRIMARY KEY,
@@ -43,24 +55,30 @@ public sealed class PostgresConversationStore : IConversationStore
                     updated_at timestamptz NOT NULL DEFAULT now()
                 )
                 """, conn);
-            cmd.ExecuteNonQuery();
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+            _initialized = true;
         }
         catch (NpgsqlException ex)
         {
             throw new InvalidOperationException($"Could not connect to PostgreSQL: {ex.Message}", ex);
         }
+        finally
+        {
+            _initGate.Release();
+        }
     }
 
-    public bool Exists()
+    public async Task<bool> ExistsAsync(CancellationToken cancellationToken = default)
     {
+        await EnsureInitializedAsync(cancellationToken);
         try
         {
-            using var conn = new NpgsqlConnection(_connectionString);
-            conn.Open();
-            using var cmd = new NpgsqlCommand(
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync(cancellationToken);
+            await using var cmd = new NpgsqlCommand(
                 "SELECT jsonb_array_length(turns) FROM conversations WHERE id = @id", conn);
             cmd.Parameters.AddWithValue("id", _conversationId);
-            return cmd.ExecuteScalar() is int length && length > 0;
+            return await cmd.ExecuteScalarAsync(cancellationToken) is int length && length > 0;
         }
         catch (NpgsqlException ex)
         {
@@ -69,15 +87,16 @@ public sealed class PostgresConversationStore : IConversationStore
         }
     }
 
-    public List<StoredTurn> Load()
+    public async Task<List<StoredTurn>> LoadAsync(CancellationToken cancellationToken = default)
     {
+        await EnsureInitializedAsync(cancellationToken);
         try
         {
-            using var conn = new NpgsqlConnection(_connectionString);
-            conn.Open();
-            using var cmd = new NpgsqlCommand("SELECT turns FROM conversations WHERE id = @id", conn);
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync(cancellationToken);
+            await using var cmd = new NpgsqlCommand("SELECT turns FROM conversations WHERE id = @id", conn);
             cmd.Parameters.AddWithValue("id", _conversationId);
-            if (cmd.ExecuteScalar() is string json)
+            if (await cmd.ExecuteScalarAsync(cancellationToken) is string json)
                 return JsonSerializer.Deserialize<List<StoredTurn>>(json) ?? new List<StoredTurn>();
             return new List<StoredTurn>();
         }
@@ -88,21 +107,22 @@ public sealed class PostgresConversationStore : IConversationStore
         }
     }
 
-    public void Save(IEnumerable<StoredTurn> turns)
+    public async Task SaveAsync(IEnumerable<StoredTurn> turns, CancellationToken cancellationToken = default)
     {
+        await EnsureInitializedAsync(cancellationToken);
         try
         {
             string json = JsonSerializer.Serialize(turns);
-            using var conn = new NpgsqlConnection(_connectionString);
-            conn.Open();
-            using var cmd = new NpgsqlCommand(
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync(cancellationToken);
+            await using var cmd = new NpgsqlCommand(
                 """
                 INSERT INTO conversations (id, turns, updated_at) VALUES (@id, @turns, now())
                 ON CONFLICT (id) DO UPDATE SET turns = @turns, updated_at = now()
                 """, conn);
             cmd.Parameters.AddWithValue("id", _conversationId);
             cmd.Parameters.Add(new NpgsqlParameter("turns", NpgsqlDbType.Jsonb) { Value = json });
-            cmd.ExecuteNonQuery();
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
         catch (NpgsqlException ex)
         {
@@ -110,15 +130,16 @@ public sealed class PostgresConversationStore : IConversationStore
         }
     }
 
-    public void Clear()
+    public async Task ClearAsync(CancellationToken cancellationToken = default)
     {
+        await EnsureInitializedAsync(cancellationToken);
         try
         {
-            using var conn = new NpgsqlConnection(_connectionString);
-            conn.Open();
-            using var cmd = new NpgsqlCommand("DELETE FROM conversations WHERE id = @id", conn);
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync(cancellationToken);
+            await using var cmd = new NpgsqlCommand("DELETE FROM conversations WHERE id = @id", conn);
             cmd.Parameters.AddWithValue("id", _conversationId);
-            cmd.ExecuteNonQuery();
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
         catch (NpgsqlException ex)
         {

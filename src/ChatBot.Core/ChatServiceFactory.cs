@@ -7,8 +7,8 @@ namespace ChatBot;
 /// <summary>Creates the configured <see cref="IChatService"/> for a conversation.</summary>
 public interface IChatServiceFactory
 {
-    /// <summary>Creates a chat engine (history is loaded from the conversation store).</summary>
-    IChatService Create();
+    /// <summary>Creates a chat engine, loading prior history from the conversation store.</summary>
+    Task<IChatService> CreateAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -42,9 +42,10 @@ public sealed class ChatServiceFactory : IChatServiceFactory
         _loggerFactory = loggerFactory;
     }
 
-    public IChatService Create()
+    public async Task<IChatService> CreateAsync(CancellationToken cancellationToken = default)
     {
         string systemPrompt = ResolveSystemPrompt(_options);
+        List<StoredTurn> seed = await _store.LoadAsync(cancellationToken);
 
         if (_options.Compaction)
         {
@@ -54,11 +55,11 @@ public sealed class ChatServiceFactory : IChatServiceFactory
                     .LogWarning("Tools are not used in compaction mode; {Count} tool(s) ignored.", _tools.Count);
             }
 
-            return new CompactionChatService(_client, _options, systemPrompt, _store,
+            return new CompactionChatService(_client, _options, systemPrompt, _store, seed,
                 _loggerFactory.CreateLogger<CompactionChatService>());
         }
 
-        return new StreamingChatService(_completion, _options, systemPrompt, _store, _tools,
+        return new StreamingChatService(_completion, _options, systemPrompt, _store, seed, _tools,
             _loggerFactory.CreateLogger<StreamingChatService>());
     }
 
