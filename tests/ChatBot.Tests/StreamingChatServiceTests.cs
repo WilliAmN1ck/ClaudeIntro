@@ -10,11 +10,13 @@ public class StreamingChatServiceTests
         ChatOptions options,
         IConversationStore store,
         IChatCompletionClient? completion = null,
-        IEnumerable<IChatTool>? tools = null) =>
+        IEnumerable<IChatTool>? tools = null,
+        IEnumerable<StoredTurn>? seed = null) =>
         new(completion ?? new FakeCompletionClient(),
             options,
             "system",
             store,
+            seed ?? Array.Empty<StoredTurn>(),
             tools ?? Array.Empty<IChatTool>(),
             NullLogger<StreamingChatService>.Instance);
 
@@ -43,22 +45,22 @@ public class StreamingChatServiceTests
     }
 
     [Fact]
-    public void Seeds_history_from_store()
+    public void Seeds_history_from_seed()
     {
         var seed = new[] { new StoredTurn("user", "hi"), new StoredTurn("assistant", "hello") };
-        var svc = NewService(new ChatOptions(), new FakeConversationStore(seed));
+        var svc = NewService(new ChatOptions(), new FakeConversationStore(), seed: seed);
 
         Assert.Equal(2, svc.History.Count);
         Assert.Equal("hello", svc.History[1].Text);
     }
 
     [Fact]
-    public void Clear_empties_history_and_store()
+    public async Task Clear_empties_history_and_store()
     {
-        var store = new FakeConversationStore(new[] { new StoredTurn("user", "hi") });
-        var svc = NewService(new ChatOptions(), store);
+        var store = new FakeConversationStore();
+        var svc = NewService(new ChatOptions(), store, seed: new[] { new StoredTurn("user", "hi") });
 
-        svc.Clear();
+        await svc.ClearAsync();
 
         Assert.Empty(svc.History);
         Assert.True(store.Cleared);

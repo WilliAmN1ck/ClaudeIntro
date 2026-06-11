@@ -33,17 +33,18 @@ public sealed class FileConversationStore : IConversationStore
         }
     }
 
-    public bool Exists() => File.Exists(_path) && new FileInfo(_path).Length > 0;
+    public Task<bool> ExistsAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(File.Exists(_path) && new FileInfo(_path).Length > 0);
 
-    public List<StoredTurn> Load()
+    public async Task<List<StoredTurn>> LoadAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            if (!Exists())
+            if (!File.Exists(_path) || new FileInfo(_path).Length == 0)
                 return new List<StoredTurn>();
 
-            return JsonSerializer.Deserialize<List<StoredTurn>>(File.ReadAllText(_path))
-                   ?? new List<StoredTurn>();
+            string json = await File.ReadAllTextAsync(_path, cancellationToken);
+            return JsonSerializer.Deserialize<List<StoredTurn>>(json) ?? new List<StoredTurn>();
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -53,7 +54,7 @@ public sealed class FileConversationStore : IConversationStore
         }
     }
 
-    public void Save(IEnumerable<StoredTurn> turns)
+    public async Task SaveAsync(IEnumerable<StoredTurn> turns, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -61,7 +62,7 @@ public sealed class FileConversationStore : IConversationStore
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
 
-            File.WriteAllText(_path, JsonSerializer.Serialize(turns, SerializerOptions));
+            await File.WriteAllTextAsync(_path, JsonSerializer.Serialize(turns, SerializerOptions), cancellationToken);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -69,7 +70,7 @@ public sealed class FileConversationStore : IConversationStore
         }
     }
 
-    public void Clear()
+    public Task ClearAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -80,5 +81,7 @@ public sealed class FileConversationStore : IConversationStore
         {
             _logger.LogWarning(ex, "Could not clear history at {Path}", _path);
         }
+
+        return Task.CompletedTask;
     }
 }

@@ -31,6 +31,7 @@ public sealed class StreamingChatService : IChatService
         ChatOptions options,
         string systemPrompt,
         IConversationStore store,
+        IEnumerable<StoredTurn> seed,
         IEnumerable<IChatTool> tools,
         ILogger<StreamingChatService> logger)
     {
@@ -49,13 +50,13 @@ public sealed class StreamingChatService : IChatService
             new() { Text = systemPrompt, CacheControl = new CacheControlEphemeral() },
         };
 
-        _turns.AddRange(store.Load());
+        _turns.AddRange(seed);
     }
 
-    public void Clear()
+    public async Task ClearAsync(CancellationToken cancellationToken = default)
     {
         _turns.Clear();
-        _store.Clear();
+        await _store.ClearAsync(cancellationToken);
     }
 
     public async IAsyncEnumerable<string> SendAsync(
@@ -128,7 +129,7 @@ public sealed class StreamingChatService : IChatService
         _turns.Add(new StoredTurn("user", userMessage));
         _turns.Add(new StoredTurn("assistant", reply.ToString()));
         LastTurnUsage = new TokenUsage(inputTokens, outputTokens, cacheRead, cacheCreation);
-        _store.Save(_turns);
+        await _store.SaveAsync(_turns, cancellationToken);
 
         _logger.LogInformation("Turn complete: {Usage}", LastTurnUsage);
     }

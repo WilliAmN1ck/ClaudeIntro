@@ -32,6 +32,7 @@ public sealed class CompactionChatService : IChatService
         ChatOptions options,
         string systemPrompt,
         IConversationStore store,
+        IEnumerable<StoredTurn> seed,
         ILogger<CompactionChatService> logger)
     {
         _client = client;
@@ -42,7 +43,7 @@ public sealed class CompactionChatService : IChatService
         _system = systemPrompt;
         SystemPrompt = systemPrompt;
 
-        foreach (StoredTurn turn in store.Load())
+        foreach (StoredTurn turn in seed)
         {
             _turns.Add(turn);
             Role role = turn.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase)
@@ -52,11 +53,11 @@ public sealed class CompactionChatService : IChatService
         }
     }
 
-    public void Clear()
+    public async Task ClearAsync(CancellationToken cancellationToken = default)
     {
         _betaHistory.Clear();
         _turns.Clear();
-        _store.Clear();
+        await _store.ClearAsync(cancellationToken);
     }
 
     public async IAsyncEnumerable<string> SendAsync(
@@ -113,7 +114,7 @@ public sealed class CompactionChatService : IChatService
             response.Usage.CacheReadInputTokens ?? 0,
             response.Usage.CacheCreationInputTokens ?? 0);
 
-        _store.Save(_turns);
+        await _store.SaveAsync(_turns, cancellationToken);
         _logger.LogInformation("Turn complete: {Usage}", LastTurnUsage);
 
         yield return reply;

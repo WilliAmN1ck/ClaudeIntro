@@ -13,13 +13,13 @@ public class FileConversationStoreTests : IDisposable
         new(Options.Create(new ChatOptions { HistoryPath = _path }), NullLogger<FileConversationStore>.Instance);
 
     [Fact]
-    public void Save_then_load_round_trips()
+    public async Task Save_then_load_round_trips()
     {
         var store = NewStore();
         var turns = new List<StoredTurn> { new("user", "hi"), new("assistant", "hello") };
 
-        store.Save(turns);
-        var loaded = store.Load();
+        await store.SaveAsync(turns);
+        var loaded = await store.LoadAsync();
 
         Assert.Equal(2, loaded.Count);
         Assert.Equal("user", loaded[0].Role);
@@ -27,34 +27,34 @@ public class FileConversationStoreTests : IDisposable
     }
 
     [Fact]
-    public void Exists_reflects_file_state()
+    public async Task Exists_reflects_file_state()
     {
         var store = NewStore();
-        Assert.False(store.Exists());
+        Assert.False(await store.ExistsAsync());
 
-        store.Save(new List<StoredTurn> { new("user", "hi") });
-        Assert.True(store.Exists());
+        await store.SaveAsync(new List<StoredTurn> { new("user", "hi") });
+        Assert.True(await store.ExistsAsync());
     }
 
     [Fact]
-    public void Clear_removes_saved_history()
+    public async Task Clear_removes_saved_history()
     {
         var store = NewStore();
-        store.Save(new List<StoredTurn> { new("user", "hi") });
+        await store.SaveAsync(new List<StoredTurn> { new("user", "hi") });
 
-        store.Clear();
+        await store.ClearAsync();
 
-        Assert.False(store.Exists());
-        Assert.Empty(store.Load());
+        Assert.False(await store.ExistsAsync());
+        Assert.Empty(await store.LoadAsync());
     }
 
     [Fact]
-    public void Corrupt_file_loads_as_empty()
+    public async Task Corrupt_file_loads_as_empty()
     {
-        File.WriteAllText(_path, "{ this is not valid json ]");
+        await File.WriteAllTextAsync(_path, "{ this is not valid json ]");
         var store = NewStore();
 
-        Assert.Empty(store.Load());
+        Assert.Empty(await store.LoadAsync());
     }
 
     public void Dispose()

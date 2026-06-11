@@ -239,11 +239,12 @@ services.AddLogging(b => b.AddConsole());   // the host supplies logging
 services.AddChatBot(configuration);          // binds ChatOptions, registers the client/store/factory
 var provider = services.BuildServiceProvider();
 
-IChatService chat = provider.GetRequiredService<IChatServiceFactory>().Create();
+IChatService chat = await provider.GetRequiredService<IChatServiceFactory>().CreateAsync();
 await foreach (string delta in chat.SendAsync("Hello"))
     Console.Write(delta);
 ```
 
 `AddChatBot` deliberately does **not** configure logging — the consumer brings its
 own providers. Swap persistence by registering a different `IConversationStore`
-before `AddChatBot` (or after, to override).
+before `AddChatBot` (or after, to override); the store is fully async
+(`LoadAsync`/`SaveAsync`/…), so a database backend never blocks the calling thread.

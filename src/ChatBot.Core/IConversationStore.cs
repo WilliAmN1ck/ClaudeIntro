@@ -2,20 +2,20 @@ namespace ChatBot;
 
 /// <summary>
 /// Persistence for a conversation. Implementations decide where/how turns are
-/// stored (JSON file, SQLite, a database, …); the location is fixed at construction,
-/// not passed per call.
+/// stored (JSON file, PostgreSQL, …); the location is fixed at construction, not
+/// passed per call. Async so database-backed stores don't block the calling thread.
 /// </summary>
 public interface IConversationStore
 {
     /// <summary>True if a non-empty saved conversation exists.</summary>
-    bool Exists();
+    Task<bool> ExistsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Loads saved turns, or an empty list if none/unreadable.</summary>
-    List<StoredTurn> Load();
+    Task<List<StoredTurn>> LoadAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Persists the given turns, replacing any prior contents.</summary>
-    void Save(IEnumerable<StoredTurn> turns);
+    Task SaveAsync(IEnumerable<StoredTurn> turns, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes the saved conversation, if any.</summary>
-    void Clear();
+    Task ClearAsync(CancellationToken cancellationToken = default);
 }

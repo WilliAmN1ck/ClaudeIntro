@@ -55,11 +55,29 @@ using ServiceProvider provider = new ServiceCollection()
 
 ChatOptions options = provider.GetRequiredService<IOptions<ChatOptions>>().Value;
 
-// Resolving the factory constructs the AnthropicClient, which throws if the key is unset.
-IChatServiceFactory factory;
+// Resolving the factory constructs the AnthropicClient (throws if the key is unset);
+// the first store call may surface a misconfigured/unreachable database. Both are
+// reported as a clean startup error.
+IChatService chat;
 try
 {
-    factory = provider.GetRequiredService<IChatServiceFactory>();
+    var factory = provider.GetRequiredService<IChatServiceFactory>();
+    IConversationStore store = provider.GetRequiredService<IConversationStore>();
+
+    // Resume is a host (console) concern. Declining wipes the store, so the engine
+    // (whose history the factory loads from the store) starts fresh.
+    if (await store.ExistsAsync())
+    {
+        Console.Write("Found a saved conversation. Resume it? [Y/n] ");
+        string? answer = Console.ReadLine();
+        if (answer is not null && answer.Trim().Equals("n", StringComparison.OrdinalIgnoreCase))
+        {
+            await store.ClearAsync();
+            Console.WriteLine("Started a fresh conversation.");
+        }
+    }
+
+    chat = await factory.CreateAsync();
 }
 catch (InvalidOperationException ex)
 {
@@ -67,22 +85,6 @@ catch (InvalidOperationException ex)
     return 1;
 }
 
-IConversationStore store = provider.GetRequiredService<IConversationStore>();
-
-// Resume is a host (console) concern. Declining wipes the store, so the engine
-// (which loads its history from the store) starts fresh.
-if (store.Exists())
-{
-    Console.Write("Found a saved conversation. Resume it? [Y/n] ");
-    string? answer = Console.ReadLine();
-    if (answer is not null && answer.Trim().Equals("n", StringComparison.OrdinalIgnoreCase))
-    {
-        store.Clear();
-        Console.WriteLine("Started a fresh conversation.");
-    }
-}
-
-IChatService chat = factory.Create();
 if (chat.History.Count > 0)
     Console.WriteLine($"Resumed {chat.History.Count} turn(s).");
 
@@ -122,7 +124,7 @@ while (true)
 
     if (input.Trim().Equals("clear", StringComparison.OrdinalIgnoreCase))
     {
-        chat.Clear();
+        await chat.ClearAsync();
         Console.WriteLine("Conversation history cleared.");
         continue;
     }

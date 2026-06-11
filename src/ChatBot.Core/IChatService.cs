@@ -28,6 +28,6 @@ public interface IChatService
     /// </summary>
     IAsyncEnumerable<string> SendAsync(string userMessage, CancellationToken cancellationToken = default);
 
-    /// <summary>Drops all in-memory conversation context.</summary>
-    void Clear();
+    /// <summary>Drops the in-memory conversation context and clears the persisted store.</summary>
+    Task ClearAsync(CancellationToken cancellationToken = default);
 }
