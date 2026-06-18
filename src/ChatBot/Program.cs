@@ -1,3 +1,4 @@
+using System.Globalization;
 using ChatBot;
 using ChatBot.Tools;
 using Microsoft.Extensions.Configuration;
@@ -88,8 +89,8 @@ Console.WriteLine($"Model: {chat.Model}  |  MaxTokens: {chat.MaxTokens}  |  Stor
 ModelPricing? pricing = ModelPrices.For(chat.Model, options.Pricing);
 if (pricing is { } rates)
     Console.WriteLine(
-        $"Pricing: ${rates.InputPerMillion:0.##} in / ${rates.OutputPerMillion:0.##} out per Mtok " +
-        $"(cache ${rates.CacheWritePerMillion:0.##} write / ${rates.CacheReadPerMillion:0.##} read)");
+        $"Pricing: ${Rate(rates.InputPerMillion)} in / ${Rate(rates.OutputPerMillion)} out per Mtok " +
+        $"(cache ${Rate(rates.CacheWritePerMillion)} write / ${Rate(rates.CacheReadPerMillion)} read)");
 
 Console.WriteLine($"Persona: {chat.SystemPrompt}");
 var toolNames = provider.GetServices<IChatTool>().Select(t => t.Name).ToList();
@@ -158,7 +159,7 @@ while (true)
             {
                 decimal turnCost = CostEstimator.Estimate(usage, turnRates);
                 sessionCost += turnCost;
-                Console.WriteLine($"[tokens: {usage} | cost: ${turnCost:0.0000} (session ${sessionCost:0.0000})]");
+                Console.WriteLine($"[tokens: {usage} | cost: ${Money(turnCost)} (session ${Money(sessionCost)})]");
             }
             else
             {
@@ -183,9 +184,14 @@ while (true)
 }
 
 if (sessionCost > 0m)
-    Console.WriteLine($"\nSession cost: ${sessionCost:0.0000}");
+    Console.WriteLine($"\nSession cost: ${Money(sessionCost)}");
 Console.WriteLine("\nGoodbye!");
 return 0;
+
+// USD amounts are formatted with the invariant culture so the '$' value always uses a
+// '.' decimal separator, regardless of the host machine's locale.
+static string Money(decimal value) => value.ToString("0.0000", CultureInfo.InvariantCulture);
+static string Rate(decimal value) => value.ToString("0.##", CultureInfo.InvariantCulture);
 
 // Dispatches a parsed management command, mutating the active engine (`chat`) when switching.
 async Task HandleCommandAsync(ChatCommand command)

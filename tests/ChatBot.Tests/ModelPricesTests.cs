@@ -55,4 +55,17 @@ public class ModelPricesTests
         };
         Assert.Equal(42m, ModelPrices.For("claude-opus-4-8", overrides)!.InputPerMillion);
     }
+
+    [Fact]
+    public void For_override_does_not_mutate_builtin_table()
+    {
+        var overrides = new Dictionary<string, ModelPricing>
+        {
+            ["claude-opus-4-8"] = new() { InputPerMillion = 999m },
+        };
+        _ = ModelPrices.For("claude-opus-4-8", overrides);
+
+        // A later lookup without overrides still returns the built-in rate.
+        Assert.Equal(5m, ModelPrices.For("claude-opus-4-8")!.InputPerMillion);
+    }
 }

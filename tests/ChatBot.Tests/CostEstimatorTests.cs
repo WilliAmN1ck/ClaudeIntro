@@ -25,7 +25,7 @@ public class CostEstimatorTests
     public void Estimate_scales_with_token_counts()
     {
         // 200k input * $5/M = $1.00; 40k output * $25/M = $1.00 => $2.00
-        var usage = new TokenUsage(200_000, 40_000, 0, 0);
+        var usage = new TokenUsage(200_000, 40_000, CacheReadTokens: 0, CacheCreationTokens: 0);
         Assert.Equal(2.00m, CostEstimator.Estimate(usage, Opus));
     }
 

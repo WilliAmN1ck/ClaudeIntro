@@ -157,6 +157,9 @@ so rates can be updated without recompiling:
 
 Equivalent environment variable: `ChatBot__Pricing__claude-opus-4-8__InputPerMillion=5.00`.
 
+An override replaces **all four** rates for that model, so specify every field — an omitted
+rate is treated as `0`.
+
 ## Tools
 
 The model can call **tools** (functions) mid-conversation. The default streaming
