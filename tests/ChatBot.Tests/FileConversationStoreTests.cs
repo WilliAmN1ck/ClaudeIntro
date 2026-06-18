@@ -119,10 +119,13 @@ public class FileConversationStoreTests : IDisposable
     {
         var store = NewStore();
         // A hostile id must not escape the conversations directory.
-        await store.SaveAsync("../escape", new[] { new StoredTurn("user", "x") });
+        await store.SaveAsync("../../escape", new[] { new StoredTurn("user", "x") });
 
-        Assert.False(File.Exists(Path.Combine(_dir, "escape.json")));
-        Assert.NotNull(await store.GetAsync("../escape")); // normalized consistently on both ends
+        // The slug strips the traversal so the file lands inside conversations/, and nothing is
+        // written directly under the base dir (where an un-slugified "../escape" would resolve).
+        Assert.True(File.Exists(Path.Combine(_dir, "conversations", "escape.json")));
+        Assert.Empty(Directory.GetFiles(_dir));
+        Assert.NotNull(await store.GetAsync("../../escape")); // normalized consistently on both ends
     }
 
     [Fact]
