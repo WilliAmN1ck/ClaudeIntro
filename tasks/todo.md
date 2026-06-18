@@ -32,6 +32,6 @@ Live checklist (updated during execution). See `docs/plans/phase-multi-conversat
 - [x] handoff.md
 
 ## Review
-- [x] Build + full test suite green (71 passed, 1 skipped) + host smoke test
-- [ ] `/code-review` pass 1 + root-cause fixes
-- [ ] `/code-review` pass 2 + root-cause fixes
+- [x] Build + full test suite green (77 passed, 1 skipped) + host smoke test
+- [x] `/code-review` pass 1 + root-cause fixes (id consistency, Postgres resilience, jsonb guard)
+- [x] `/code-review` pass 2 + root-cause fixes (path-safety assertion, fake-store fidelity)

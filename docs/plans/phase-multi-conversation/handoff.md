@@ -3,7 +3,7 @@
 - **Date:** 2026-06-18
 - **Branch:** `feature/multi-conversation` (from `origin/main` @ `f493f6e`)
 - **Plan:** `docs/plans/phase-multi-conversation/{spec.md,plan.md}`
-- **Status:** Implementation complete; build + tests green; host smoke-tested. Pending: two `/code-review` passes.
+- **Status:** Complete. Build + 77 tests green (1 Postgres integration skipped); host smoke-tested; two `/code-review` passes done with root-cause fixes.
 
 ## What Was Built
 
@@ -61,11 +61,29 @@
 - Integration (opt-in): Postgres create/save/load/rename/list/delete round-trip.
 - Manual smoke: drove `/help /list /new /rename /switch /delete (+confirm) /clear /bogus exit` against a temp store with a dummy key — no API calls, all flows correct.
 
+## Code Review (two passes, max effort)
+
+- **Pass 1 fixes (commit `fix: address code-review findings`):** centralized id/title
+  resolution in `ConversationSlug.Resolve` and normalized ids at every store boundary (the
+  file and Postgres backends previously diverged; an all-symbols id produced an empty-id
+  `.json` dotfile); wrapped Postgres `CreateAsync` to surface DB failures as
+  `InvalidOperationException` with the host degrading gracefully; guarded
+  `jsonb_array_length` with `jsonb_typeof` and de-duplicated the Postgres projection.
+- **Pass 2 fixes (commit `test: tighten ...`):** made `FakeConversationStore` slugify ids
+  like production so it can catch normalization regressions; rewrote `Ids_are_path_safe` to
+  actually pin traversal protection (it previously asserted the wrong directory).
+- **Deferred with rationale (not bugs):** SaveAsync re-reads the doc to preserve metadata —
+  a metadata cache was judged YAGNI for a single-user console app (invalidation risk > a
+  non-bottleneck); the interrupted-first-run migration edge is rare and non-data-loss (the
+  legacy `history.json` is never deleted); the create/delete race needs concurrent clients
+  (single-user host); `clear`-keeps-the-conversation is the intended new semantic.
+
 ## Known Issues / Tech Debt
 
 - Listing scans every conversation file (no index). Fine for a console app's handful of conversations; revisit if it grows.
-- Postgres `ExistingIds` for `/new` dedup does a `SELECT id` then inserts — a tiny TOCTOU window exists for concurrent `/new`, irrelevant for a single-user console host.
+- File-store `SaveAsync` reads the existing document each turn to preserve title/created-at (O(history) per save). Acceptable for the console use case; a metadata cache would remove it if the engine is reused server-side.
 - Rename does not bump `UpdatedAt` (ordering reflects message activity, not metadata edits) — intentional.
+- Upgrading Postgres users who previously set a non-slug `--conversation` id reach a freshly-slugified id; the old row remains but is opened under its slug. The common `default` id is unaffected.
 
 ## Verification Commands
 
