@@ -28,8 +28,8 @@ Live checklist (updated during execution). See `docs/plans/phase-multi-conversat
 - [x] Update `--help` usage text
 
 ## Sub-phase 6 — Docs + handoff
-- [ ] README + feature-plan updates
-- [ ] handoff.md
+- [x] README + feature-plan updates
+- [x] handoff.md
 
 ## Review
 - [x] Build + full test suite green (71 passed, 1 skipped) + host smoke test
