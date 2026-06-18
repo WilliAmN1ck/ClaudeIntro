@@ -51,7 +51,9 @@ dotnet run --project src/ChatBot
 ```
 
 Type messages at the `You:` prompt. The reply streams in under `Claude:`, and a
-`[tokens: …]` line reports usage after each turn. Press **Ctrl-C** while a reply is
+`[tokens: … | cost: $… (session $…)]` line reports token usage and the USD cost
+after each turn (cost is shown when the model's price is known; see
+[Cost reporting](#cost-reporting)). Press **Ctrl-C** while a reply is
 streaming to cancel just that reply (the app keeps running); press it at the prompt
 to exit. API errors are reported inline (`[error] …`) without crashing.
 
@@ -129,6 +131,34 @@ dotnet run --project src/ChatBot -- --compaction
 # Show all options
 dotnet run --project src/ChatBot -- --help
 ```
+
+### Cost reporting
+
+Each turn prints its USD cost beside the token counts, plus a running session total,
+and the session total again on exit. The active model's rates appear in the startup
+banner. Costs use a built-in per-model price table (Anthropic list prices, USD per
+million tokens; cache **write** at 1.25× and **read** at 0.1× of the input rate, matching
+the ephemeral cache the engine uses). Unknown models show tokens only.
+
+Override or extend the table via the `ChatBot:Pricing` config section (keyed by model id),
+so rates can be updated without recompiling:
+
+```jsonc
+// appsettings.json
+"ChatBot": {
+  "Pricing": {
+    "claude-opus-4-8": {
+      "InputPerMillion": 5.00, "OutputPerMillion": 25.00,
+      "CacheWritePerMillion": 6.25, "CacheReadPerMillion": 0.50
+    }
+  }
+}
+```
+
+Equivalent environment variable: `ChatBot__Pricing__claude-opus-4-8__InputPerMillion=5.00`.
+
+An override replaces **all four** rates for that model, so specify every field — an omitted
+rate is treated as `0`.
 
 ## Tools
 

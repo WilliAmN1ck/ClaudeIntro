@@ -1,3 +1,4 @@
+using System.Globalization;
 using ChatBot;
 using ChatBot.Tools;
 using Microsoft.Extensions.Configuration;
@@ -83,12 +84,23 @@ Console.WriteLine($"Model: {chat.Model}  |  MaxTokens: {chat.MaxTokens}  |  Stor
                   (options.Compaction
                       ? "server-side compaction"
                       : options.MaxHistoryMessages > 0 ? $"last {options.MaxHistoryMessages} msgs" : "unlimited"));
+
+// Per-model pricing for cost reporting (null when the model is unknown — tokens shown without cost).
+ModelPricing? pricing = ModelPrices.For(chat.Model, options.Pricing);
+if (pricing is { } rates)
+    Console.WriteLine(
+        $"Pricing: ${Rate(rates.InputPerMillion)} in / ${Rate(rates.OutputPerMillion)} out per Mtok " +
+        $"(cache ${Rate(rates.CacheWritePerMillion)} write / ${Rate(rates.CacheReadPerMillion)} read)");
+
 Console.WriteLine($"Persona: {chat.SystemPrompt}");
 var toolNames = provider.GetServices<IChatTool>().Select(t => t.Name).ToList();
 if (toolNames.Count > 0 && !options.Compaction)
     Console.WriteLine($"Tools: {string.Join(", ", toolNames)}");
 await PrintActiveConversationAsync();
 Console.WriteLine(new string('-', 50));
+
+// Running USD cost across the process session (per-turn cost is summed as replies complete).
+decimal sessionCost = 0m;
 
 // Ctrl-C cancels the in-progress reply without killing the app; at the prompt it exits normally.
 CancellationTokenSource? turnCts = null;
@@ -142,7 +154,18 @@ while (true)
         Console.WriteLine();
 
         if (chat.LastTurnUsage is { } usage)
-            Console.WriteLine($"[tokens: {usage}]");
+        {
+            if (pricing is { } turnRates)
+            {
+                decimal turnCost = CostEstimator.Estimate(usage, turnRates);
+                sessionCost += turnCost;
+                Console.WriteLine($"[tokens: {usage} | cost: ${Money(turnCost)} (session ${Money(sessionCost)})]");
+            }
+            else
+            {
+                Console.WriteLine($"[tokens: {usage}]");
+            }
+        }
     }
     catch (OperationCanceledException)
     {
@@ -160,8 +183,15 @@ while (true)
     }
 }
 
+if (sessionCost > 0m)
+    Console.WriteLine($"\nSession cost: ${Money(sessionCost)}");
 Console.WriteLine("\nGoodbye!");
 return 0;
+
+// USD amounts are formatted with the invariant culture so the '$' value always uses a
+// '.' decimal separator, regardless of the host machine's locale.
+static string Money(decimal value) => value.ToString("0.0000", CultureInfo.InvariantCulture);
+static string Rate(decimal value) => value.ToString("0.##", CultureInfo.InvariantCulture);
 
 // Dispatches a parsed management command, mutating the active engine (`chat`) when switching.
 async Task HandleCommandAsync(ChatCommand command)

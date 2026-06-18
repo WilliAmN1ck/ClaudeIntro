@@ -195,8 +195,20 @@ First step: **dependency injection + configuration** (foundation for packaging t
   `/help`) parsed by the pure, unit-tested `ChatCommandParser`. `--conversation <id>` selects
   the startup conversation for both backends.
 
+## Cost reporting
+
+- `ModelPricing` holds per-model rates (USD per million tokens); `ModelPrices` is the built-in
+  table (Opus 4.8/4.7/4.6, Sonnet 4.6, Haiku 4.5, Fable 5 — Anthropic list prices as of 2026-06,
+  with cache write/read at 1.25×/0.1× of input to match the engine's ephemeral cache).
+- `CostEstimator.Estimate(usage, pricing)` is a pure, rate-weighted sum over the four disjoint
+  token categories (uncached input, output, cache write, cache read).
+- The table is overridable via the `ChatBot:Pricing` config section, addressing the
+  "needs a maintained price table" concern — rates update without recompiling.
+- The console host prints each turn's cost, a running session total, the model's rates in the
+  banner, and the session total on exit. Unknown models degrade to tokens-only.
+
 ## Out of Scope (future)
 
-- Dollar-cost computation (needs a maintained price table); token counts are exposed so callers can derive it.
 - Tool use within compaction mode.
 - Per-conversation overrides (model, system prompt) beyond the shared session settings.
+- Live pricing fetched from an API (the table is static but config-overridable).
