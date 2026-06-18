@@ -7,6 +7,9 @@ namespace ChatBot;
 /// </summary>
 public interface IChatService
 {
+    /// <summary>Id of the conversation this engine is bound to (where turns are persisted).</summary>
+    string ConversationId { get; }
+
     /// <summary>Effective model id in use.</summary>
     string Model { get; }
 
@@ -28,6 +31,9 @@ public interface IChatService
     /// </summary>
     IAsyncEnumerable<string> SendAsync(string userMessage, CancellationToken cancellationToken = default);
 
-    /// <summary>Drops the in-memory conversation context and clears the persisted store.</summary>
+    /// <summary>
+    /// Empties this conversation's history — in memory and in the store — while keeping the
+    /// conversation itself (its id and metadata). Use the store's delete to remove it entirely.
+    /// </summary>
     Task ClearAsync(CancellationToken cancellationToken = default);
 }

@@ -6,6 +6,8 @@ namespace ChatBot.Tests;
 
 public class StreamingChatServiceTests
 {
+    private const string ConvId = "test";
+
     private static StreamingChatService NewService(
         ChatOptions options,
         IConversationStore store,
@@ -15,6 +17,7 @@ public class StreamingChatServiceTests
         new(completion ?? new FakeCompletionClient(),
             options,
             "system",
+            ConvId,
             store,
             seed ?? Array.Empty<StoredTurn>(),
             tools ?? Array.Empty<IChatTool>(),
@@ -63,7 +66,14 @@ public class StreamingChatServiceTests
         await svc.ClearAsync();
 
         Assert.Empty(svc.History);
-        Assert.True(store.Cleared);
+        Assert.Empty(store.SavedFor(ConvId)); // conversation kept, but emptied
+    }
+
+    [Fact]
+    public void Conversation_id_is_exposed()
+    {
+        var svc = NewService(new ChatOptions(), new FakeConversationStore());
+        Assert.Equal(ConvId, svc.ConversationId);
     }
 
     [Fact]
@@ -88,7 +98,7 @@ public class StreamingChatServiceTests
         Assert.Equal("hello there", svc.History[1].Text);
         Assert.Equal(12, svc.LastTurnUsage!.Value.InputTokens);
         Assert.Equal(7, svc.LastTurnUsage!.Value.OutputTokens);
-        Assert.Equal(2, store.Saved.Count); // persisted on success
+        Assert.Equal(2, store.SavedFor(ConvId).Count); // persisted on success
     }
 
     [Fact]

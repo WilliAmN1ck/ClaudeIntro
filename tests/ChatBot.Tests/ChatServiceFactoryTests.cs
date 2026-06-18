@@ -1,10 +1,34 @@
+using Anthropic;
 using ChatBot;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace ChatBot.Tests;
 
 public class ChatServiceFactoryTests
 {
+    [Fact]
+    public async Task CreateAsync_binds_engine_to_conversation_and_seeds_history()
+    {
+        var store = new FakeConversationStore();
+        store.Seed("trip", new[] { new StoredTurn("user", "hi"), new StoredTurn("assistant", "hello") });
+
+        var factory = new ChatServiceFactory(
+            new AnthropicClient { ApiKey = "test-key" },
+            new FakeCompletionClient(),
+            Options.Create(new ChatOptions()),
+            store,
+            Array.Empty<IChatTool>(),
+            NullLoggerFactory.Instance);
+
+        IChatService chat = await factory.CreateAsync("trip");
+
+        Assert.Equal("trip", chat.ConversationId);
+        Assert.Equal(2, chat.History.Count);
+        Assert.Equal("hello", chat.History[1].Text);
+    }
+
     [Fact]
     public void Inline_prompt_wins()
     {
