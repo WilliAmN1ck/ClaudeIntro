@@ -83,12 +83,23 @@ Console.WriteLine($"Model: {chat.Model}  |  MaxTokens: {chat.MaxTokens}  |  Stor
                   (options.Compaction
                       ? "server-side compaction"
                       : options.MaxHistoryMessages > 0 ? $"last {options.MaxHistoryMessages} msgs" : "unlimited"));
+
+// Per-model pricing for cost reporting (null when the model is unknown — tokens shown without cost).
+ModelPricing? pricing = ModelPrices.For(chat.Model, options.Pricing);
+if (pricing is { } rates)
+    Console.WriteLine(
+        $"Pricing: ${rates.InputPerMillion:0.##} in / ${rates.OutputPerMillion:0.##} out per Mtok " +
+        $"(cache ${rates.CacheWritePerMillion:0.##} write / ${rates.CacheReadPerMillion:0.##} read)");
+
 Console.WriteLine($"Persona: {chat.SystemPrompt}");
 var toolNames = provider.GetServices<IChatTool>().Select(t => t.Name).ToList();
 if (toolNames.Count > 0 && !options.Compaction)
     Console.WriteLine($"Tools: {string.Join(", ", toolNames)}");
 await PrintActiveConversationAsync();
 Console.WriteLine(new string('-', 50));
+
+// Running USD cost across the process session (per-turn cost is summed as replies complete).
+decimal sessionCost = 0m;
 
 // Ctrl-C cancels the in-progress reply without killing the app; at the prompt it exits normally.
 CancellationTokenSource? turnCts = null;
@@ -142,7 +153,18 @@ while (true)
         Console.WriteLine();
 
         if (chat.LastTurnUsage is { } usage)
-            Console.WriteLine($"[tokens: {usage}]");
+        {
+            if (pricing is { } turnRates)
+            {
+                decimal turnCost = CostEstimator.Estimate(usage, turnRates);
+                sessionCost += turnCost;
+                Console.WriteLine($"[tokens: {usage} | cost: ${turnCost:0.0000} (session ${sessionCost:0.0000})]");
+            }
+            else
+            {
+                Console.WriteLine($"[tokens: {usage}]");
+            }
+        }
     }
     catch (OperationCanceledException)
     {
@@ -160,6 +182,8 @@ while (true)
     }
 }
 
+if (sessionCost > 0m)
+    Console.WriteLine($"\nSession cost: ${sessionCost:0.0000}");
 Console.WriteLine("\nGoodbye!");
 return 0;
 
