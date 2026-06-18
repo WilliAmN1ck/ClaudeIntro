@@ -37,4 +37,10 @@ public sealed class ChatOptions
 
     /// <summary>Use beta server-side compaction instead of the count-based history trim.</summary>
     public bool Compaction { get; set; }
+
+    /// <summary>
+    /// Optional per-model price overrides (USD per million tokens), keyed by model id. Merged
+    /// over the built-in table in <see cref="ModelPrices"/> so rates can be updated via config.
+    /// </summary>
+    public Dictionary<string, ModelPricing>? Pricing { get; set; }
 }

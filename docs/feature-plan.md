@@ -210,3 +210,4 @@ First step: **dependency injection + configuration** (foundation for packaging t
 
 - Dollar-cost computation (needs a maintained price table); token counts are exposed so callers can derive it.
 - Per-conversation overrides (model, system prompt) beyond the shared session settings.
+- Live pricing fetched from an API (the table is static but config-overridable).
