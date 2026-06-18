@@ -4,10 +4,11 @@
 
 A small multi-turn console chatbot built with **C# / .NET 10** and the official
 [Anthropic .NET SDK](https://www.nuget.org/packages/Anthropic). It streams
-Claude's replies token-by-token, persists conversations across runs, supports a
-configurable system prompt, runs **tools** the model can call, and offers
-context-window management via either a message-count cap or beta server-side
-compaction. The engine lives in a reusable `ChatBot.Core` library.
+Claude's replies token-by-token, persists multiple named conversations across runs
+(switch between them with slash commands), supports a configurable system prompt,
+runs **tools** the model can call, and offers context-window management via either a
+message-count cap or beta server-side compaction. The engine lives in a reusable
+`ChatBot.Core` library.
 
 ## Prerequisites
 
@@ -56,11 +57,23 @@ to exit. API errors are reported inline (`[error] …`) without crashing.
 
 ### In-chat commands
 
-| Command         | Effect                                   |
-| --------------- | ---------------------------------------- |
-| `exit` / `quit` | End the session                          |
-| `clear`         | Wipe the saved conversation history      |
-| `Ctrl-C`        | Cancel the streaming reply (or exit at the prompt) |
+Conversation-management commands use a leading `/` so they never collide with a
+message you actually want to send. Type `/help` while running to see them.
+
+| Command            | Effect                                                        |
+| ------------------ | ------------------------------------------------------------- |
+| `/list` (`/ls`)    | List conversations, newest first (`*` marks the active one)   |
+| `/new [title]`     | Create and switch to a new conversation                       |
+| `/switch <id>`     | Switch to an existing conversation (alias `/use`)             |
+| `/rename <title>`  | Rename the active conversation (its id is unchanged)          |
+| `/delete [id]`     | Delete a conversation (defaults to the active one; confirms)  |
+| `/clear` / `clear` | Empty the active conversation's history (keeps the conversation) |
+| `/help` (`/?`)     | Show the command list                                         |
+| `exit` / `quit`    | End the session                                               |
+| `Ctrl-C`           | Cancel the streaming reply (or exit at the prompt)            |
+
+Conversation ids are short slugs derived from the title (e.g. `Trip Planning` →
+`trip-planning`), so they're easy to type after `/switch`.
 
 ## Configuration
 
@@ -87,9 +100,9 @@ level is `Warning`, keeping normal runs quiet; raise it (e.g. `ChatBot`/`Default
 | `--max-history`   | `<n>`    | `ChatBot__MaxHistoryMessages` | `40`                 | Cap on recent messages sent per request. `0` = unlimited. Ignored when compaction is on. |
 | `--system`        | `<text>` | `ChatBot__SystemPrompt`       | helpful-assistant    | System prompt text (the bot's persona/instructions). |
 | `--system-file`   | `<path>` | `ChatBot__SystemPromptFile`   | —                    | Read the system prompt from a file (useful for long prompts). |
-| `--history`       | `<path>` | `ChatBot__HistoryPath`        | `%APPDATA%/ClaudeIntro/history.json` | Where the conversation is saved/loaded (file store). |
+| `--history`       | `<path>` | `ChatBot__HistoryPath`        | `%APPDATA%/ClaudeIntro/history.json` | Base path for the file store; conversations live in a `conversations/` dir beside it. |
 | `--store`         | `<name>` | `ChatBot__Store`              | `file`               | Conversation store backend: `file` or `postgres`. |
-| `--conversation`  | `<id>`   | `ChatBot__ConversationId`     | `default`            | Conversation row key for the Postgres store. |
+| `--conversation`  | `<id>`   | `ChatBot__ConversationId`     | `default`            | Conversation to open at startup (both stores). Created if it doesn't exist. |
 | *(n/a)*           | —        | `ChatBot__PostgresConnectionString` | —              | Npgsql connection string; required when `--store postgres`. |
 | `--compaction`    | *(flag)* | `ChatBot__Compaction`         | `false`              | Use beta server-side compaction (summarizes old turns) instead of the count-based trim. **Non-streaming**; requires a compaction-capable model (Opus 4.6+/Sonnet 4.6). |
 | `-h`, `--help`    | *(flag)* | —                             | —                    | Print usage and exit. |
@@ -154,15 +167,23 @@ crashing the turn.
 
 ## Conversation persistence
 
-Persistence is behind the `IConversationStore` abstraction, with two backends:
+Persistence is behind the `IConversationStore` abstraction, which manages **multiple
+named conversations** — each with an id, a title, created/updated timestamps, and its
+turns. Two backends ship:
 
-- **File (default)** — JSON at `%APPDATA%/ClaudeIntro/history.json`. Zero setup.
+- **File (default)** — one JSON document per conversation under
+  `%APPDATA%/ClaudeIntro/conversations/<id>.json`. Zero setup.
 - **PostgreSQL** — opt-in with `--store postgres` plus `ChatBot__PostgresConnectionString`.
-  Turns are stored as a `jsonb` row keyed by `--conversation` (default `default`); the
-  table is created automatically on first use.
+  Each conversation is a `jsonb` row in the `conversations` table, created/upgraded
+  automatically on first use.
 
-On startup, if a saved conversation exists you are asked whether to resume it; the
-`clear` command starts fresh.
+On startup the app opens the conversation named by `--conversation` (default `default`),
+creating it if needed. Use the slash commands above to list, create, switch, rename, and
+delete conversations during a session.
+
+**Upgrading from a single history:** the first time the new file store runs, a
+pre-existing `%APPDATA%/ClaudeIntro/history.json` is migrated into a conversation named
+`default`, so your existing chat is preserved and selectable.
 
 ```powershell
 # Run against a local Postgres (see docker-compose.yml)
@@ -200,9 +221,12 @@ console host that references it.
 | &nbsp;&nbsp;`ChatOptions.cs`                  | Strongly-typed settings (the `ChatBot` section) |
 | &nbsp;&nbsp;`ServiceCollectionExtensions.cs`  | `AddChatBot` DI registration                   |
 | &nbsp;&nbsp;`StoredTurn.cs`                    | One persisted conversation turn (role + text)  |
-| &nbsp;&nbsp;`IConversationStore.cs`           | Persistence abstraction                        |
-| &nbsp;&nbsp;`FileConversationStore.cs`        | JSON-file implementation of the store          |
-| &nbsp;&nbsp;`PostgresConversationStore.cs`    | PostgreSQL (`jsonb`) implementation of the store |
+| &nbsp;&nbsp;`ConversationInfo.cs`             | Per-conversation metadata (id, title, timestamps, turn count) |
+| &nbsp;&nbsp;`ConversationSlug.cs`             | Derives stable, typeable ids from titles       |
+| &nbsp;&nbsp;`ChatCommand.cs` / `ChatCommandParser.cs` | Parse a console line into a send-or-manage intent (unit-tested) |
+| &nbsp;&nbsp;`IConversationStore.cs`           | Multi-conversation persistence abstraction     |
+| &nbsp;&nbsp;`FileConversationStore.cs`        | JSON document-per-conversation store (+ legacy migration) |
+| &nbsp;&nbsp;`PostgresConversationStore.cs`    | PostgreSQL (`jsonb`) multi-conversation store  |
 | `tests/ChatBot.Tests/`                        | xUnit unit tests (reference `ChatBot.Core`)    |
 | `docker-compose.yml`                          | Local PostgreSQL for the opt-in store          |
 | `docs/feature-plan.md`                        | Feature plan and implementation notes          |
@@ -215,9 +239,10 @@ dotnet test
 ```
 
 The tests cover the network-independent logic — history trimming, system-prompt
-resolution, the file store (round-trip/corrupt/clear), sample tools, tool dispatch,
-the **agentic tool loop** (via a scripted `IChatCompletionClient` fake), and engine
-option clamping and history seeding.
+resolution, the file store (round-trips, **legacy migration**, path-safe ids, corrupt
+files), conversation-id slugging, **console-command parsing**, sample tools, tool
+dispatch, the **agentic tool loop** (via a scripted `IChatCompletionClient` fake), and
+engine option clamping, history seeding, and per-conversation persistence.
 
 The PostgreSQL round-trip test is an **integration test** that runs only when a
 connection string is provided, and is skipped otherwise:
@@ -239,7 +264,8 @@ services.AddLogging(b => b.AddConsole());   // the host supplies logging
 services.AddChatBot(configuration);          // binds ChatOptions, registers the client/store/factory
 var provider = services.BuildServiceProvider();
 
-IChatService chat = await provider.GetRequiredService<IChatServiceFactory>().CreateAsync();
+// Open (or create) a conversation by id, then chat. List/create/delete via the store.
+IChatService chat = await provider.GetRequiredService<IChatServiceFactory>().CreateAsync("default");
 await foreach (string delta in chat.SendAsync("Hello"))
     Console.Write(delta);
 ```

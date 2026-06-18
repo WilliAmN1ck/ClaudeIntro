@@ -21,6 +21,7 @@ public sealed class CompactionChatService : IChatService
     private readonly List<BetaMessageParam> _betaHistory = new();
     private readonly List<StoredTurn> _turns = new();
 
+    public string ConversationId { get; }
     public string Model { get; }
     public long MaxTokens { get; }
     public string SystemPrompt { get; }
@@ -31,6 +32,7 @@ public sealed class CompactionChatService : IChatService
         AnthropicClient client,
         ChatOptions options,
         string systemPrompt,
+        string conversationId,
         IConversationStore store,
         IEnumerable<StoredTurn> seed,
         ILogger<CompactionChatService> logger)
@@ -38,6 +40,7 @@ public sealed class CompactionChatService : IChatService
         _client = client;
         _store = store;
         _logger = logger;
+        ConversationId = conversationId;
         Model = string.IsNullOrWhiteSpace(options.Model) ? "claude-opus-4-8" : options.Model.Trim();
         MaxTokens = options.MaxTokens >= 1 ? options.MaxTokens : 4096;
         _system = systemPrompt;
@@ -57,7 +60,7 @@ public sealed class CompactionChatService : IChatService
     {
         _betaHistory.Clear();
         _turns.Clear();
-        await _store.ClearAsync(cancellationToken);
+        await _store.SaveAsync(ConversationId, _turns, cancellationToken);
     }
 
     public async IAsyncEnumerable<string> SendAsync(
@@ -114,7 +117,7 @@ public sealed class CompactionChatService : IChatService
             response.Usage.CacheReadInputTokens ?? 0,
             response.Usage.CacheCreationInputTokens ?? 0);
 
-        await _store.SaveAsync(_turns, cancellationToken);
+        await _store.SaveAsync(ConversationId, _turns, cancellationToken);
         _logger.LogInformation("Turn complete: {Usage}", LastTurnUsage);
 
         yield return reply;

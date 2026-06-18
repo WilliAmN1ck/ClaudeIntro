@@ -174,8 +174,29 @@ First step: **dependency injection + configuration** (foundation for packaging t
 - History loading moved out of the engine constructors into `IChatServiceFactory.CreateAsync`, which loads the seed and passes it in. `IChatService.Clear()` became `ClearAsync()`. The console host awaits these.
 - Postgres connection/credential failures surface on first use as a clean startup error (`InvalidOperationException`), caught by the host.
 
+## Multi-conversation management
+
+- `IConversationStore` manages **multiple named conversations** (was: a single fixed
+  history). Each has a `ConversationInfo` (id, title, created/updated timestamps, turn
+  count). The id-scoped contract is `ListAsync`/`GetAsync`/`CreateAsync`/`LoadAsync(id)`/
+  `SaveAsync(id, turns)`/`RenameAsync`/`DeleteAsync`.
+- Ids are slugs derived from titles (`ConversationSlug`, e.g. `Trip Planning` →
+  `trip-planning`), deduped and stable across rename; they double as file names, so they're
+  slugified for path safety.
+- `FileConversationStore` keeps one JSON document per conversation under a `conversations/`
+  directory and migrates a legacy single-file `history.json` into `default` exactly once
+  (keyed on the directory's first creation, so deleting `default` never resurrects it).
+- `PostgresConversationStore` upgrades its table in place (`ADD COLUMN IF NOT EXISTS title`,
+  `created_at`) and implements the full op set; the existing single row is preserved.
+- The engine binds to a conversation id (`IChatService.ConversationId`); `ClearAsync` empties
+  the conversation while keeping it. `IChatServiceFactory.CreateAsync(id)` seeds from that
+  conversation, so switching means creating a fresh engine.
+- The console host exposes slash commands (`/list`, `/new`, `/switch`, `/rename`, `/delete`,
+  `/help`) parsed by the pure, unit-tested `ChatCommandParser`. `--conversation <id>` selects
+  the startup conversation for both backends.
+
 ## Out of Scope (future)
 
 - Dollar-cost computation (needs a maintained price table); token counts are exposed so callers can derive it.
 - Tool use within compaction mode.
-- Multi-conversation management beyond the single `ConversationId` key.
+- Per-conversation overrides (model, system prompt) beyond the shared session settings.

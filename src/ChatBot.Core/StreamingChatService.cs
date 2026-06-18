@@ -20,6 +20,7 @@ public sealed class StreamingChatService : IChatService
     private readonly List<TextBlockParam> _systemBlocks;
     private readonly List<StoredTurn> _turns = new();
 
+    public string ConversationId { get; }
     public string Model { get; }
     public long MaxTokens { get; }
     public string SystemPrompt { get; }
@@ -30,6 +31,7 @@ public sealed class StreamingChatService : IChatService
         IChatCompletionClient completion,
         ChatOptions options,
         string systemPrompt,
+        string conversationId,
         IConversationStore store,
         IEnumerable<StoredTurn> seed,
         IEnumerable<IChatTool> tools,
@@ -39,6 +41,7 @@ public sealed class StreamingChatService : IChatService
         _store = store;
         _tools = new ToolInvoker(tools);
         _logger = logger;
+        ConversationId = conversationId;
         Model = string.IsNullOrWhiteSpace(options.Model) ? "claude-opus-4-8" : options.Model.Trim();
         MaxTokens = options.MaxTokens >= 1 ? options.MaxTokens : 4096;
         _maxHistoryMessages = options.MaxHistoryMessages >= 0 ? options.MaxHistoryMessages : 40;
@@ -56,7 +59,7 @@ public sealed class StreamingChatService : IChatService
     public async Task ClearAsync(CancellationToken cancellationToken = default)
     {
         _turns.Clear();
-        await _store.ClearAsync(cancellationToken);
+        await _store.SaveAsync(ConversationId, _turns, cancellationToken);
     }
 
     public async IAsyncEnumerable<string> SendAsync(
@@ -129,7 +132,7 @@ public sealed class StreamingChatService : IChatService
         _turns.Add(new StoredTurn("user", userMessage));
         _turns.Add(new StoredTurn("assistant", reply.ToString()));
         LastTurnUsage = new TokenUsage(inputTokens, outputTokens, cacheRead, cacheCreation);
-        await _store.SaveAsync(_turns, cancellationToken);
+        await _store.SaveAsync(ConversationId, _turns, cancellationToken);
 
         _logger.LogInformation("Turn complete: {Usage}", LastTurnUsage);
     }

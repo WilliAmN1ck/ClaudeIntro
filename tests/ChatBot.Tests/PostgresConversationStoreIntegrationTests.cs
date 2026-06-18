@@ -6,9 +6,9 @@ using Xunit;
 namespace ChatBot.Tests;
 
 /// <summary>
-/// Integration tests for <see cref="PostgresConversationStore"/>. They run only when
-/// the <c>CHATBOT_TEST_POSTGRES</c> environment variable holds a connection string,
-/// and are skipped otherwise (e.g. in CI without a database).
+/// Integration tests for <see cref="PostgresConversationStore"/>. They run only when the
+/// <c>CHATBOT_TEST_POSTGRES</c> environment variable holds a connection string, and are
+/// skipped otherwise (e.g. in CI without a database).
 ///
 /// Local Postgres: <c>docker compose up -d</c>, then set
 /// CHATBOT_TEST_POSTGRES="Host=localhost;Username=chatbot;Password=chatbot;Database=chatbot".
@@ -17,44 +17,51 @@ public class PostgresConversationStoreIntegrationTests
 {
     private static string? ConnectionString => Environment.GetEnvironmentVariable("CHATBOT_TEST_POSTGRES");
 
-    private static PostgresConversationStore NewStore(string conversationId)
+    private static PostgresConversationStore NewStore()
     {
         var options = Options.Create(new ChatOptions
         {
             Store = "postgres",
             PostgresConnectionString = ConnectionString,
-            ConversationId = conversationId,
         });
         return new PostgresConversationStore(options, NullLogger<PostgresConversationStore>.Instance);
     }
 
     [SkippableFact]
-    public async Task Save_load_clear_round_trips()
+    public async Task Multi_conversation_round_trips()
     {
         Skip.If(string.IsNullOrWhiteSpace(ConnectionString), "CHATBOT_TEST_POSTGRES not set.");
 
-        string id = $"test_{Guid.NewGuid():N}";
-        PostgresConversationStore store = NewStore(id);
+        PostgresConversationStore store = NewStore();
+        string id = $"test-{Guid.NewGuid():N}"; // already a valid slug (ids are normalized)
         try
         {
-            Assert.False(await store.ExistsAsync());
+            Assert.Null(await store.GetAsync(id));
 
-            await store.SaveAsync(new List<StoredTurn> { new("user", "hi"), new("assistant", "hello") });
+            ConversationInfo created = await store.CreateAsync(id, "My Title");
+            Assert.Equal(id, created.Id);
+            Assert.Equal("My Title", created.Title);
 
-            Assert.True(await store.ExistsAsync());
-            var loaded = await store.LoadAsync();
+            await store.SaveAsync(id, new List<StoredTurn> { new("user", "hi"), new("assistant", "hello") });
+
+            var loaded = await store.LoadAsync(id);
             Assert.Equal(2, loaded.Count);
-            Assert.Equal("user", loaded[0].Role);
             Assert.Equal("hello", loaded[1].Text);
+            Assert.Equal(2, (await store.GetAsync(id))!.TurnCount);
 
-            // Save replaces prior contents.
-            await store.SaveAsync(new List<StoredTurn> { new("user", "again") });
-            Assert.Single(await store.LoadAsync());
+            await store.RenameAsync(id, "Renamed");
+            Assert.Equal("Renamed", (await store.GetAsync(id))!.Title);
+
+            // Save replaces prior turns rather than appending.
+            await store.SaveAsync(id, new List<StoredTurn> { new("user", "again") });
+            Assert.Single(await store.LoadAsync(id));
+
+            Assert.Contains(await store.ListAsync(), c => c.Id == id);
         }
         finally
         {
-            await store.ClearAsync();
-            Assert.False(await store.ExistsAsync());
+            await store.DeleteAsync(id);
+            Assert.Null(await store.GetAsync(id));
         }
     }
 
