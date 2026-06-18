@@ -85,7 +85,7 @@ Console.WriteLine($"Model: {chat.Model}  |  MaxTokens: {chat.MaxTokens}  |  Stor
                       : options.MaxHistoryMessages > 0 ? $"last {options.MaxHistoryMessages} msgs" : "unlimited"));
 Console.WriteLine($"Persona: {chat.SystemPrompt}");
 var toolNames = provider.GetServices<IChatTool>().Select(t => t.Name).ToList();
-if (toolNames.Count > 0 && !options.Compaction)
+if (toolNames.Count > 0)
     Console.WriteLine($"Tools: {string.Join(", ", toolNames)}");
 await PrintActiveConversationAsync();
 Console.WriteLine(new string('-', 50));

@@ -1,4 +1,3 @@
-using Anthropic;
 using ChatBot;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -15,8 +14,8 @@ public class ChatServiceFactoryTests
         store.Seed("trip", new[] { new StoredTurn("user", "hi"), new StoredTurn("assistant", "hello") });
 
         var factory = new ChatServiceFactory(
-            new AnthropicClient { ApiKey = "test-key" },
             new FakeCompletionClient(),
+            new FakeBetaCompletionClient(),
             Options.Create(new ChatOptions()),
             store,
             Array.Empty<IChatTool>(),
