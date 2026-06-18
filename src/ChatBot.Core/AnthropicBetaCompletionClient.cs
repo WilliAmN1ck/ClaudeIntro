@@ -42,7 +42,13 @@ public sealed class AnthropicBetaCompletionClient : IBetaCompletionClient
             }
             else if (block.TryPickCompaction(out BetaCompactionBlock? compaction))
             {
-                assistantContent.Add(new BetaCompactionBlockParam { Content = compaction.Content });
+                // Round-trip both the summary and the opaque metadata verbatim — the API uses
+                // them to replace the compacted history on the next request.
+                assistantContent.Add(new BetaCompactionBlockParam
+                {
+                    Content = compaction.Content,
+                    EncryptedContent = compaction.EncryptedContent,
+                });
             }
         }
 

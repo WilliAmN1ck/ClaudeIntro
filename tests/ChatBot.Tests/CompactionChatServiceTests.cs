@@ -12,9 +12,10 @@ public class CompactionChatServiceTests
         IConversationStore store,
         IBetaCompletionClient? completion = null,
         IEnumerable<IChatTool>? tools = null,
-        IEnumerable<StoredTurn>? seed = null) =>
+        IEnumerable<StoredTurn>? seed = null,
+        ChatOptions? options = null) =>
         new(completion ?? new FakeBetaCompletionClient(),
-            new ChatOptions(),
+            options ?? new ChatOptions(),
             "system",
             ConvId,
             store,
@@ -103,6 +104,57 @@ public class CompactionChatServiceTests
         Assert.Equal(2, completion.CallCount);
         Assert.Equal("recovered", svc.History[1].Text);
     }
+
+    [Fact]
+    public async Task Multiple_tool_calls_in_one_turn_all_execute()
+    {
+        var a = new RecordingTool("a");
+        var b = new RecordingTool("b");
+        var store = new FakeConversationStore();
+        var completion = new FakeBetaCompletionClient(
+            BetaFakeTurn.ToolUses("",
+                new ToolCall("c1", "a", Json.Args(new { })),
+                new ToolCall("c2", "b", Json.Args(new { }))),
+            BetaFakeTurn.Reply("done"));
+
+        var svc = NewService(store, completion, new IChatTool[] { a, b });
+
+        string output = await Collect(svc.SendAsync("go"));
+
+        Assert.True(a.Invoked);
+        Assert.True(b.Invoked);
+        Assert.Contains("[tool: a]", output);
+        Assert.Contains("[tool: b]", output);
+        Assert.Contains("done", output);
+        Assert.Equal(2, completion.CallCount); // one turn with two tool calls = two API calls
+    }
+
+    [Fact]
+    public async Task Failed_turn_leaves_history_untouched()
+    {
+        var store = new FakeConversationStore();
+        var svc = NewService(store, new ThrowingBetaCompletionClient());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await Collect(svc.SendAsync("hi")));
+
+        Assert.Empty(svc.History);          // commit-on-success: nothing persisted
+        Assert.Null(svc.LastTurnUsage);
+        Assert.Empty(store.SavedFor(ConvId));
+    }
+
+    [Fact]
+    public void Clamps_invalid_options_to_defaults()
+    {
+        var svc = NewService(new FakeConversationStore(),
+            options: new ChatOptions { Model = "  ", MaxTokens = 0 });
+
+        Assert.Equal("claude-opus-4-8", svc.Model);
+        Assert.Equal(4096, svc.MaxTokens);
+    }
+
+    [Fact]
+    public void No_usage_before_first_turn() =>
+        Assert.Null(NewService(new FakeConversationStore()).LastTurnUsage);
 
     [Fact]
     public async Task Clear_empties_history_and_store()

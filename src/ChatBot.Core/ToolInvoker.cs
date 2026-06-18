@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Anthropic.Models.Messages;
+using Beta = Anthropic.Models.Beta.Messages;
 
 namespace ChatBot;
 
@@ -13,8 +14,11 @@ public sealed class ToolInvoker
 
     public IReadOnlyList<IChatTool> Tools { get; }
 
-    /// <summary>SDK tool definitions for the request's <c>Tools</c> parameter.</summary>
+    /// <summary>SDK tool definitions for the streaming request's <c>Tools</c> parameter.</summary>
     public IReadOnlyList<ToolUnion> ToolUnions { get; }
+
+    /// <summary>SDK tool definitions for the beta (compaction) request's <c>Tools</c> parameter.</summary>
+    public IReadOnlyList<Beta.BetaToolUnion> BetaToolUnions { get; }
 
     public ToolInvoker(IEnumerable<IChatTool> tools)
     {
@@ -22,9 +26,15 @@ public sealed class ToolInvoker
         _byName = Tools.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
         var unions = new List<ToolUnion>(Tools.Count);
+        var betaUnions = new List<Beta.BetaToolUnion>(Tools.Count);
         foreach (IChatTool tool in Tools)
+        {
             unions.Add(ToSdkTool(tool));
+            betaUnions.Add(ToBetaTool(tool));
+        }
+
         ToolUnions = unions;
+        BetaToolUnions = betaUnions;
     }
 
     /// <summary>
@@ -49,6 +59,17 @@ public sealed class ToolInvoker
     }
 
     private static Tool ToSdkTool(IChatTool tool) => new()
+    {
+        Name = tool.Name,
+        Description = tool.Description,
+        InputSchema = new()
+        {
+            Properties = tool.Properties.ToDictionary(kv => kv.Key, kv => kv.Value),
+            Required = tool.Required.ToList(),
+        },
+    };
+
+    private static Beta.BetaTool ToBetaTool(IChatTool tool) => new()
     {
         Name = tool.Name,
         Description = tool.Description,

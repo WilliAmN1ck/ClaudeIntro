@@ -17,7 +17,6 @@ public sealed class CompactionChatService : IChatService
     private readonly IBetaCompletionClient _completion;
     private readonly IConversationStore _store;
     private readonly ToolInvoker _tools;
-    private readonly IReadOnlyList<BetaToolUnion> _betaTools;
     private readonly ILogger<CompactionChatService> _logger;
     private readonly string _system;
     private readonly List<BetaMessageParam> _betaHistory = new();
@@ -43,7 +42,6 @@ public sealed class CompactionChatService : IChatService
         _completion = completion;
         _store = store;
         _tools = new ToolInvoker(tools);
-        _betaTools = _tools.Tools.Select(ToBetaTool).ToList();
         _logger = logger;
         ConversationId = conversationId;
         Model = string.IsNullOrWhiteSpace(options.Model) ? "claude-opus-4-8" : options.Model.Trim();
@@ -93,7 +91,7 @@ public sealed class CompactionChatService : IChatService
                     Edits = [new BetaCompact20260112Edit()],
                 },
                 Messages = conversation,
-                Tools = _betaTools.Count > 0 ? _betaTools.ToList() : null,
+                Tools = _tools.BetaToolUnions.Count > 0 ? _tools.BetaToolUnions.ToList() : null,
             };
 
             _logger.LogInformation("Compaction request: {MessageCount} message(s) in context", conversation.Count);
@@ -141,15 +139,4 @@ public sealed class CompactionChatService : IChatService
 
         _logger.LogInformation("Turn complete: {Usage}", LastTurnUsage);
     }
-
-    private static BetaToolUnion ToBetaTool(IChatTool tool) => new BetaTool
-    {
-        Name = tool.Name,
-        Description = tool.Description,
-        InputSchema = new()
-        {
-            Properties = tool.Properties.ToDictionary(kv => kv.Key, kv => kv.Value),
-            Required = tool.Required.ToList(),
-        },
-    };
 }

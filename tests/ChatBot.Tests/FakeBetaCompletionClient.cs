@@ -33,10 +33,30 @@ internal static class BetaFakeTurn
     public static BetaCompletionResult ToolUse(string text, ToolCall call, long inTok = 10, long outTok = 5) =>
         new(text,
             new[] { call },
-            new BetaContentBlockParam[]
-            {
-                new BetaToolUseBlockParam { ID = call.Id, Name = call.Name, Input = call.Input },
-            },
+            ToolUseBlocks(call),
             StoppedForToolUse: true,
             new TokenUsage(inTok, outTok, 0, 0));
+
+    public static BetaCompletionResult ToolUses(string text, params ToolCall[] calls) =>
+        new(text,
+            calls,
+            ToolUseBlocks(calls),
+            StoppedForToolUse: true,
+            new TokenUsage(10, 5, 0, 0));
+
+    private static IReadOnlyList<BetaContentBlockParam> ToolUseBlocks(params ToolCall[] calls) =>
+        calls.Select(c => (BetaContentBlockParam)new BetaToolUseBlockParam
+        {
+            ID = c.Id,
+            Name = c.Name,
+            Input = c.Input,
+        }).ToList();
+}
+
+/// <summary>A beta completion client that always throws, for commit-on-failure tests.</summary>
+internal sealed class ThrowingBetaCompletionClient : IBetaCompletionClient
+{
+    public Task<BetaCompletionResult> CreateAsync(
+        MessageCreateParams parameters, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("boom");
 }
