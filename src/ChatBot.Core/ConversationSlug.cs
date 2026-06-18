@@ -58,4 +58,21 @@ public static class ConversationSlug
             n++;
         return $"{baseSlug}-{n}";
     }
+
+    /// <summary>
+    /// Resolves the (id, title) for a created/ensured conversation, identically for every store.
+    /// An explicit <paramref name="id"/> is slugified and used as-is (so callers can "ensure" a
+    /// specific conversation); a null id — or one with no usable characters — is derived uniquely
+    /// from <paramref name="title"/>. The title defaults to the resolved id when blank.
+    /// </summary>
+    public static (string Id, string Title) Resolve(string? id, string? title, IEnumerable<string> existingIds)
+    {
+        string normalizedExplicit = id is null ? string.Empty : Slugify(id);
+        string resolvedId = normalizedExplicit.Length > 0
+            ? normalizedExplicit
+            : MakeUnique(Slugify(title), existingIds);
+
+        string resolvedTitle = string.IsNullOrWhiteSpace(title) ? resolvedId : title.Trim();
+        return (resolvedId, resolvedTitle);
+    }
 }

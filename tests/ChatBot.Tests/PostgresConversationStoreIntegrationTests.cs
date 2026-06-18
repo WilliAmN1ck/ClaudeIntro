@@ -33,7 +33,7 @@ public class PostgresConversationStoreIntegrationTests
         Skip.If(string.IsNullOrWhiteSpace(ConnectionString), "CHATBOT_TEST_POSTGRES not set.");
 
         PostgresConversationStore store = NewStore();
-        string id = $"test_{Guid.NewGuid():N}";
+        string id = $"test-{Guid.NewGuid():N}"; // already a valid slug (ids are normalized)
         try
         {
             Assert.Null(await store.GetAsync(id));

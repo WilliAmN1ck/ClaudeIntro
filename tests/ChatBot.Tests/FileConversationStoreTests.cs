@@ -156,6 +156,27 @@ public class FileConversationStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Get_normalizes_lookup_id()
+    {
+        var store = NewStore();
+        await store.CreateAsync("default", null);
+
+        // Different casing/spacing slugifies to the same id, so lookups still match.
+        Assert.NotNull(await store.GetAsync("Default"));
+    }
+
+    [Fact]
+    public async Task Create_with_unusable_id_falls_back_to_generated_id()
+    {
+        var store = NewStore();
+        ConversationInfo info = await store.CreateAsync("***", null);
+
+        Assert.False(string.IsNullOrEmpty(info.Id));         // never an empty id
+        Assert.Equal("chat-1", info.Id);
+        Assert.False(File.Exists(Path.Combine(_dir, "conversations", ".json"))); // no dotfile
+    }
+
+    [Fact]
     public async Task Corrupt_conversation_file_is_skipped()
     {
         Directory.CreateDirectory(Path.Combine(_dir, "conversations"));

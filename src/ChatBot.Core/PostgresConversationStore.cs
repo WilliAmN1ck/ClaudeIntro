@@ -69,6 +69,12 @@ public sealed class PostgresConversationStore : IConversationStore
         }
     }
 
+    // Projection shared by ListAsync/ReadInfoAsync. The CASE guards a row whose turns jsonb is
+    // somehow not an array, so one bad row can't make jsonb_array_length abort the whole list.
+    private const string InfoColumns =
+        "id, COALESCE(title, id), created_at, updated_at, " +
+        "CASE WHEN jsonb_typeof(turns) = 'array' THEN jsonb_array_length(turns) ELSE 0 END";
+
     public async Task<IReadOnlyList<ConversationInfo>> ListAsync(CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken);
@@ -78,21 +84,10 @@ public sealed class PostgresConversationStore : IConversationStore
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync(cancellationToken);
             await using var cmd = new NpgsqlCommand(
-                """
-                SELECT id, COALESCE(title, id), created_at, updated_at, jsonb_array_length(turns)
-                FROM conversations
-                ORDER BY updated_at DESC
-                """, conn);
+                $"SELECT {InfoColumns} FROM conversations ORDER BY updated_at DESC", conn);
             await using NpgsqlDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
-            {
-                infos.Add(new ConversationInfo(
-                    reader.GetString(0),
-                    reader.GetString(1),
-                    reader.GetFieldValue<DateTimeOffset>(2),
-                    reader.GetFieldValue<DateTimeOffset>(3),
-                    reader.GetInt32(4)));
-            }
+                infos.Add(ReadInfo(reader));
         }
         catch (NpgsqlException ex)
         {
@@ -109,7 +104,7 @@ public sealed class PostgresConversationStore : IConversationStore
         {
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync(cancellationToken);
-            return await ReadInfoAsync(conn, id, cancellationToken);
+            return await ReadInfoAsync(conn, NormalizeId(id), cancellationToken);
         }
         catch (NpgsqlException ex)
         {
@@ -122,29 +117,37 @@ public sealed class PostgresConversationStore : IConversationStore
         string? id, string? title, CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken);
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync(cancellationToken);
-
-        string resolvedId = id ?? ConversationSlug.MakeUnique(
-            ConversationSlug.Slugify(title), await ExistingIdsAsync(conn, cancellationToken));
-        string resolvedTitle = string.IsNullOrWhiteSpace(title) ? resolvedId : title.Trim();
-
-        // Insert an empty conversation; if the id already exists, leave it untouched (ensure).
-        await using (var cmd = new NpgsqlCommand(
-            """
-            INSERT INTO conversations (id, title, turns, created_at, updated_at)
-            VALUES (@id, @title, '[]'::jsonb, now(), now())
-            ON CONFLICT (id) DO NOTHING
-            """, conn))
+        try
         {
-            cmd.Parameters.AddWithValue("id", resolvedId);
-            cmd.Parameters.AddWithValue("title", resolvedTitle);
-            await cmd.ExecuteNonQueryAsync(cancellationToken);
-        }
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync(cancellationToken);
 
-        ConversationInfo? info = await ReadInfoAsync(conn, resolvedId, cancellationToken);
-        return info ?? new ConversationInfo(resolvedId, resolvedTitle,
-            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0);
+            (string resolvedId, string resolvedTitle) = ConversationSlug.Resolve(
+                id, title, await ExistingIdsAsync(conn, cancellationToken));
+
+            // Insert an empty conversation; if the id already exists, leave it untouched (ensure).
+            await using (var cmd = new NpgsqlCommand(
+                """
+                INSERT INTO conversations (id, title, turns, created_at, updated_at)
+                VALUES (@id, @title, '[]'::jsonb, now(), now())
+                ON CONFLICT (id) DO NOTHING
+                """, conn))
+            {
+                cmd.Parameters.AddWithValue("id", resolvedId);
+                cmd.Parameters.AddWithValue("title", resolvedTitle);
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            ConversationInfo? info = await ReadInfoAsync(conn, resolvedId, cancellationToken);
+            return info ?? new ConversationInfo(resolvedId, resolvedTitle,
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0);
+        }
+        catch (NpgsqlException ex)
+        {
+            // Match the store's convention: surface DB failures as InvalidOperationException so the
+            // host reports a clean error (at startup or around a command) instead of crashing.
+            throw new InvalidOperationException($"Could not create conversation: {ex.Message}", ex);
+        }
     }
 
     public async Task<List<StoredTurn>> LoadAsync(string id, CancellationToken cancellationToken = default)
@@ -155,7 +158,7 @@ public sealed class PostgresConversationStore : IConversationStore
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync(cancellationToken);
             await using var cmd = new NpgsqlCommand("SELECT turns FROM conversations WHERE id = @id", conn);
-            cmd.Parameters.AddWithValue("id", id);
+            cmd.Parameters.AddWithValue("id", NormalizeId(id));
             if (await cmd.ExecuteScalarAsync(cancellationToken) is string json)
                 return JsonSerializer.Deserialize<List<StoredTurn>>(json) ?? new List<StoredTurn>();
             return new List<StoredTurn>();
@@ -183,7 +186,7 @@ public sealed class PostgresConversationStore : IConversationStore
                 VALUES (@id, @id, @turns, now(), now())
                 ON CONFLICT (id) DO UPDATE SET turns = @turns, updated_at = now()
                 """, conn);
-            cmd.Parameters.AddWithValue("id", id);
+            cmd.Parameters.AddWithValue("id", NormalizeId(id));
             cmd.Parameters.Add(new NpgsqlParameter("turns", NpgsqlDbType.Jsonb) { Value = json });
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -204,7 +207,7 @@ public sealed class PostgresConversationStore : IConversationStore
             await conn.OpenAsync(cancellationToken);
             await using var cmd = new NpgsqlCommand(
                 "UPDATE conversations SET title = @title WHERE id = @id", conn);
-            cmd.Parameters.AddWithValue("id", id);
+            cmd.Parameters.AddWithValue("id", NormalizeId(id));
             cmd.Parameters.AddWithValue("title", title.Trim());
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -222,7 +225,7 @@ public sealed class PostgresConversationStore : IConversationStore
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync(cancellationToken);
             await using var cmd = new NpgsqlCommand("DELETE FROM conversations WHERE id = @id", conn);
-            cmd.Parameters.AddWithValue("id", id);
+            cmd.Parameters.AddWithValue("id", NormalizeId(id));
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
         catch (NpgsqlException ex)
@@ -233,24 +236,26 @@ public sealed class PostgresConversationStore : IConversationStore
 
     // --- helpers ---------------------------------------------------------------
 
+    // Ids are slugified at every entry point, consistent with FileConversationStore, so the same
+    // user input (e.g. '/switch Default') resolves to the same conversation across both backends.
+    private static string NormalizeId(string id) => ConversationSlug.Slugify(id);
+
+    private static ConversationInfo ReadInfo(NpgsqlDataReader reader) => new(
+        reader.GetString(0),
+        reader.GetString(1),
+        reader.GetFieldValue<DateTimeOffset>(2),
+        reader.GetFieldValue<DateTimeOffset>(3),
+        reader.GetInt32(4));
+
+    // Expects an already-normalized id (callers normalize at the boundary).
     private static async Task<ConversationInfo?> ReadInfoAsync(
-        NpgsqlConnection conn, string id, CancellationToken cancellationToken)
+        NpgsqlConnection conn, string normalizedId, CancellationToken cancellationToken)
     {
         await using var cmd = new NpgsqlCommand(
-            """
-            SELECT id, COALESCE(title, id), created_at, updated_at, jsonb_array_length(turns)
-            FROM conversations WHERE id = @id
-            """, conn);
-        cmd.Parameters.AddWithValue("id", id);
+            $"SELECT {InfoColumns} FROM conversations WHERE id = @id", conn);
+        cmd.Parameters.AddWithValue("id", normalizedId);
         await using NpgsqlDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
-            return null;
-        return new ConversationInfo(
-            reader.GetString(0),
-            reader.GetString(1),
-            reader.GetFieldValue<DateTimeOffset>(2),
-            reader.GetFieldValue<DateTimeOffset>(3),
-            reader.GetInt32(4));
+        return await reader.ReadAsync(cancellationToken) ? ReadInfo(reader) : null;
     }
 
     private static async Task<IEnumerable<string>> ExistingIdsAsync(

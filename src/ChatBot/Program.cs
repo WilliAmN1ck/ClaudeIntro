@@ -117,10 +117,19 @@ while (true)
     if (command is ChatCommand.Empty)
         continue;
 
-    // Conversation-management commands run at the prompt (never mid-stream).
+    // Conversation-management commands run at the prompt (never mid-stream). A store failure
+    // (e.g. a dropped database connection) degrades to an error instead of killing the session.
     if (command is not ChatCommand.Send send)
     {
-        await HandleCommandAsync(command);
+        try
+        {
+            await HandleCommandAsync(command);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine($"[error] {ex.Message}");
+        }
+
         continue;
     }
 

@@ -71,7 +71,7 @@ public sealed class FileConversationStore : IConversationStore
     public async Task<ConversationInfo?> GetAsync(string id, CancellationToken cancellationToken = default)
     {
         await EnsureMigratedAsync(cancellationToken);
-        ConversationDocument? doc = await ReadDocumentAsync(PathFor(id), cancellationToken);
+        ConversationDocument? doc = await ReadDocumentAsync(PathFor(NormalizeId(id)), cancellationToken);
         return doc is null ? null : ToInfo(doc);
     }
 
@@ -79,22 +79,14 @@ public sealed class FileConversationStore : IConversationStore
         string? id, string? title, CancellationToken cancellationToken = default)
     {
         await EnsureMigratedAsync(cancellationToken);
+
+        (string resolvedId, string resolvedTitle) = ConversationSlug.Resolve(id, title, ExistingIds());
+
+        ConversationDocument? existing = await ReadDocumentAsync(PathFor(resolvedId), cancellationToken);
+        if (existing is not null)
+            return ToInfo(existing); // idempotent ensure
+
         DateTimeOffset now = DateTimeOffset.UtcNow;
-
-        string resolvedId;
-        if (id is not null)
-        {
-            resolvedId = NormalizeId(id);
-            ConversationDocument? existing = await ReadDocumentAsync(PathFor(resolvedId), cancellationToken);
-            if (existing is not null)
-                return ToInfo(existing); // idempotent ensure
-        }
-        else
-        {
-            resolvedId = ConversationSlug.MakeUnique(ConversationSlug.Slugify(title), ExistingIds());
-        }
-
-        string resolvedTitle = string.IsNullOrWhiteSpace(title) ? resolvedId : title.Trim();
         var doc = new ConversationDocument(resolvedId, resolvedTitle, now, now, new List<StoredTurn>());
         await WriteDocumentAsync(doc, cancellationToken);
         return ToInfo(doc);
@@ -103,7 +95,7 @@ public sealed class FileConversationStore : IConversationStore
     public async Task<List<StoredTurn>> LoadAsync(string id, CancellationToken cancellationToken = default)
     {
         await EnsureMigratedAsync(cancellationToken);
-        ConversationDocument? doc = await ReadDocumentAsync(PathFor(id), cancellationToken);
+        ConversationDocument? doc = await ReadDocumentAsync(PathFor(NormalizeId(id)), cancellationToken);
         return doc?.Turns ?? new List<StoredTurn>();
     }
 
@@ -111,13 +103,13 @@ public sealed class FileConversationStore : IConversationStore
         string id, IEnumerable<StoredTurn> turns, CancellationToken cancellationToken = default)
     {
         await EnsureMigratedAsync(cancellationToken);
-        string resolvedId = NormalizeId(id);
+        string convId = NormalizeId(id);
         var list = turns.ToList();
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        ConversationDocument? existing = await ReadDocumentAsync(PathFor(resolvedId), cancellationToken);
+        ConversationDocument? existing = await ReadDocumentAsync(PathFor(convId), cancellationToken);
         ConversationDocument doc = existing is null
-            ? new ConversationDocument(resolvedId, resolvedId, now, now, list)
+            ? new ConversationDocument(convId, convId, now, now, list)
             : existing with { Turns = list, UpdatedAt = now };
 
         await WriteDocumentAsync(doc, cancellationToken);
@@ -129,7 +121,7 @@ public sealed class FileConversationStore : IConversationStore
         if (string.IsNullOrWhiteSpace(title))
             return;
 
-        ConversationDocument? existing = await ReadDocumentAsync(PathFor(id), cancellationToken);
+        ConversationDocument? existing = await ReadDocumentAsync(PathFor(NormalizeId(id)), cancellationToken);
         if (existing is null)
             return;
 
@@ -140,7 +132,7 @@ public sealed class FileConversationStore : IConversationStore
     {
         try
         {
-            string path = PathFor(id);
+            string path = PathFor(NormalizeId(id));
             if (File.Exists(path))
                 File.Delete(path);
         }
@@ -157,10 +149,12 @@ public sealed class FileConversationStore : IConversationStore
     private static ConversationInfo ToInfo(ConversationDocument d) =>
         new(d.Id, d.Title, d.CreatedAt, d.UpdatedAt, d.Turns.Count);
 
-    // Ids double as file names, so slugify keeps them on-disk-safe (no path traversal).
+    // Ids double as file names; each public method slugifies its id at the boundary so paths
+    // are on-disk-safe (no traversal) and consistent with the other stores.
     private static string NormalizeId(string id) => ConversationSlug.Slugify(id);
 
-    private string PathFor(string id) => Path.Combine(_directory, NormalizeId(id) + ".json");
+    // Assumes an already-normalized id (callers normalize once, at the boundary).
+    private string PathFor(string normalizedId) => Path.Combine(_directory, normalizedId + ".json");
 
     private IEnumerable<string> ExistingIds()
     {
