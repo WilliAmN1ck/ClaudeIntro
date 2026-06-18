@@ -31,6 +31,7 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddSingleton<IChatCompletionClient, AnthropicCompletionClient>();
+        services.AddSingleton<IBetaCompletionClient, AnthropicBetaCompletionClient>();
 
         // Select the persistence backend from configuration (default: file).
         string? store = config.GetSection(ChatOptions.SectionName)["Store"];

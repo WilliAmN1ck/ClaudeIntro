@@ -1,21 +1,22 @@
 using System.Runtime.CompilerServices;
 using System.Text;
-using Anthropic;
 using Anthropic.Models.Beta.Messages;
 using Microsoft.Extensions.Logging;
 
 namespace ChatBot;
 
 /// <summary>
-/// Chat engine that uses beta server-side compaction (<c>compact-2026-01-12</c>):
-/// the API summarizes earlier turns as context grows. Non-streaming — the reply is
-/// yielded as a single chunk. Compaction blocks in the response are preserved
-/// verbatim in history, so the full content is round-tripped each turn.
+/// Chat engine that uses beta server-side compaction (<c>compact-2026-01-12</c>): the API
+/// summarizes earlier turns as context grows. Non-streaming — each turn's reply is yielded as a
+/// chunk. Compaction blocks in the response are preserved verbatim and round-tripped each turn.
+/// Runs an agentic tool loop when tools are registered. Talks to the API through
+/// <see cref="IBetaCompletionClient"/> so the loop is testable.
 /// </summary>
 public sealed class CompactionChatService : IChatService
 {
-    private readonly AnthropicClient _client;
+    private readonly IBetaCompletionClient _completion;
     private readonly IConversationStore _store;
+    private readonly ToolInvoker _tools;
     private readonly ILogger<CompactionChatService> _logger;
     private readonly string _system;
     private readonly List<BetaMessageParam> _betaHistory = new();
@@ -29,16 +30,18 @@ public sealed class CompactionChatService : IChatService
     public TokenUsage? LastTurnUsage { get; private set; }
 
     public CompactionChatService(
-        AnthropicClient client,
+        IBetaCompletionClient completion,
         ChatOptions options,
         string systemPrompt,
         string conversationId,
         IConversationStore store,
         IEnumerable<StoredTurn> seed,
+        IEnumerable<IChatTool> tools,
         ILogger<CompactionChatService> logger)
     {
-        _client = client;
+        _completion = completion;
         _store = store;
+        _tools = new ToolInvoker(tools);
         _logger = logger;
         ConversationId = conversationId;
         Model = string.IsNullOrWhiteSpace(options.Model) ? "claude-opus-4-8" : options.Model.Trim();
@@ -66,60 +69,74 @@ public sealed class CompactionChatService : IChatService
     public async IAsyncEnumerable<string> SendAsync(
         string userMessage, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var userMsg = new BetaMessageParam { Role = Role.User, Content = userMessage };
-        var requestMessages = new List<BetaMessageParam>(_betaHistory) { userMsg };
-
-        var parameters = new MessageCreateParams
+        var conversation = new List<BetaMessageParam>(_betaHistory)
         {
-            Model = Model,
-            MaxTokens = MaxTokens,
-            System = _system,
-            Betas = ["compact-2026-01-12"],
-            ContextManagement = new BetaContextManagementConfig
-            {
-                Edits = [new BetaCompact20260112Edit()],
-            },
-            Messages = requestMessages,
+            new() { Role = Role.User, Content = userMessage },
         };
 
-        _logger.LogInformation("Compaction request: {MessageCount} message(s) in context", requestMessages.Count);
+        var reply = new StringBuilder();
+        long inputTokens = 0, outputTokens = 0, cacheRead = 0, cacheCreation = 0;
 
-        BetaMessage response = await _client.Beta.Messages.Create(parameters, cancellationToken);
-
-        // Round-trip response content into history. Compaction blocks MUST be preserved
-        // (the API uses them to replace the compacted history on the next request).
-        var blocks = new List<BetaContentBlockParam>();
-        var text = new StringBuilder();
-        foreach (BetaContentBlock block in response.Content)
+        // Agentic loop: send a turn; if the model asked for tools, run them and continue.
+        while (true)
         {
-            if (block.TryPickText(out BetaTextBlock? t))
+            var parameters = new MessageCreateParams
             {
-                blocks.Add(new BetaTextBlockParam { Text = t.Text });
-                text.Append(t.Text);
-            }
-            else if (block.TryPickCompaction(out BetaCompactionBlock? compaction))
+                Model = Model,
+                MaxTokens = MaxTokens,
+                System = _system,
+                Betas = ["compact-2026-01-12"],
+                ContextManagement = new BetaContextManagementConfig
+                {
+                    Edits = [new BetaCompact20260112Edit()],
+                },
+                Messages = conversation,
+                Tools = _tools.BetaToolUnions.Count > 0 ? _tools.BetaToolUnions.ToList() : null,
+            };
+
+            _logger.LogInformation("Compaction request: {MessageCount} message(s) in context", conversation.Count);
+
+            BetaCompletionResult result = await _completion.CreateAsync(parameters, cancellationToken);
+            inputTokens += result.Usage.InputTokens;
+            outputTokens += result.Usage.OutputTokens;
+            cacheRead += result.Usage.CacheReadTokens;
+            cacheCreation += result.Usage.CacheCreationTokens;
+
+            if (result.Text.Length > 0)
             {
-                blocks.Add(new BetaCompactionBlockParam { Content = compaction.Content });
+                reply.Append(result.Text);
+                yield return result.Text;
             }
+
+            // Round-trip the assistant content (text + tool_use + compaction blocks) into history.
+            conversation.Add(new BetaMessageParam
+            {
+                Role = Role.Assistant,
+                Content = result.AssistantContent.ToList(),
+            });
+
+            if (!result.StoppedForToolUse || result.ToolCalls.Count == 0)
+                break;
+
+            var toolResults = new List<BetaContentBlockParam>();
+            foreach (ToolCall call in result.ToolCalls)
+            {
+                yield return $"\n[tool: {call.Name}]\n";
+                _logger.LogInformation("Executing tool {Tool}", call.Name);
+                string toolResult = await _tools.InvokeAsync(call.Name, call.Input, cancellationToken);
+                toolResults.Add(new BetaToolResultBlockParam { ToolUseID = call.Id, Content = toolResult });
+            }
+            conversation.Add(new BetaMessageParam { Role = Role.User, Content = toolResults });
         }
 
-        // Commit only on success.
-        _betaHistory.Add(userMsg);
-        _betaHistory.Add(new BetaMessageParam { Role = Role.Assistant, Content = blocks });
-
-        string reply = text.ToString();
+        // Commit only on success: a cancelled or failed turn leaves history untouched.
+        _betaHistory.Clear();
+        _betaHistory.AddRange(conversation);
         _turns.Add(new StoredTurn("user", userMessage));
-        _turns.Add(new StoredTurn("assistant", reply));
-
-        LastTurnUsage = new TokenUsage(
-            response.Usage.InputTokens,
-            response.Usage.OutputTokens,
-            response.Usage.CacheReadInputTokens ?? 0,
-            response.Usage.CacheCreationInputTokens ?? 0);
-
+        _turns.Add(new StoredTurn("assistant", reply.ToString()));
+        LastTurnUsage = new TokenUsage(inputTokens, outputTokens, cacheRead, cacheCreation);
         await _store.SaveAsync(ConversationId, _turns, cancellationToken);
-        _logger.LogInformation("Turn complete: {Usage}", LastTurnUsage);
 
-        yield return reply;
+        _logger.LogInformation("Turn complete: {Usage}", LastTurnUsage);
     }
 }

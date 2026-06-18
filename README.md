@@ -162,10 +162,10 @@ rate is treated as `0`.
 
 ## Tools
 
-The model can call **tools** (functions) mid-conversation. The default streaming
-engine runs an agentic loop: it streams text, and if Claude requests a tool it
-executes the tool, returns the result, and continues until done. A `[tool: name]`
-line marks each call. (Tool use is **not** available in `--compaction` mode.)
+The model can call **tools** (functions) mid-conversation. Both engines run an agentic
+loop: they emit text, and if Claude requests a tool they execute it, return the result,
+and continue until done. A `[tool: name]` line marks each call. Tool use works in the
+default streaming mode and in `--compaction` mode alike.
 
 Two sample tools ship in `ChatBot.Core` and are registered by the console host:
 `get_current_time` and `roll_dice`.

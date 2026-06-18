@@ -150,7 +150,7 @@ First step: **dependency injection + configuration** (foundation for packaging t
 ### Tool use / function calling
 - `IChatTool` (name, description, JSON-schema `Properties`/`Required`, `ExecuteAsync`) is the consumer-implementable tool contract; `ToolSchema` provides parameter helpers. Tools are registered in DI and injected into the engine.
 - `StreamingChatService` runs the agentic loop: stream text → on `stop_reason == tool_use`, execute each tool and send `tool_result` back → repeat until `end_turn`. Tool failures return an error string instead of crashing; usage is summed across loop iterations.
-- Tool-use/tool-result turns are in-call only; persistence stays text-only. Tool use is streaming-mode only (compaction logs a warning and ignores tools).
+- Tool-use/tool-result turns are in-call only; persistence stays text-only. Both the streaming and compaction engines run the agentic tool loop (the beta compaction call is behind `IBetaCompletionClient` so the loop is unit-tested).
 - Sample tools shipped in Core: `CurrentTimeTool`, `RollDiceTool` (registered by the host).
 
 ### PostgreSQL store (opt-in)
@@ -195,20 +195,19 @@ First step: **dependency injection + configuration** (foundation for packaging t
   `/help`) parsed by the pure, unit-tested `ChatCommandParser`. `--conversation <id>` selects
   the startup conversation for both backends.
 
-## Cost reporting
+## Tool use in compaction mode
 
-- `ModelPricing` holds per-model rates (USD per million tokens); `ModelPrices` is the built-in
-  table (Opus 4.8/4.7/4.6, Sonnet 4.6, Haiku 4.5, Fable 5 — Anthropic list prices as of 2026-06,
-  with cache write/read at 1.25×/0.1× of input to match the engine's ephemeral cache).
-- `CostEstimator.Estimate(usage, pricing)` is a pure, rate-weighted sum over the four disjoint
-  token categories (uncached input, output, cache write, cache read).
-- The table is overridable via the `ChatBot:Pricing` config section, addressing the
-  "needs a maintained price table" concern — rates update without recompiling.
-- The console host prints each turn's cost, a running session total, the model's rates in the
-  banner, and the session total on exit. Unknown models degrade to tokens-only.
+- The beta compaction engine now runs the same agentic tool loop as the streaming engine
+  (previously it ignored tools and logged a warning).
+- The beta `Messages.Create` call is abstracted behind `IBetaCompletionClient`
+  (`AnthropicBetaCompletionClient` is the real impl), mirroring `IChatCompletionClient`, so the
+  compaction loop — tool_use → tool_result → end_turn, usage summing, unknown-tool recovery,
+  compaction-block round-tripping — is unit-tested with a scripted fake.
+- `CompactionChatService` builds beta tool definitions from the registered `IChatTool`s and
+  preserves compaction blocks across tool iterations.
 
 ## Out of Scope (future)
 
-- Tool use within compaction mode.
+- Dollar-cost computation (needs a maintained price table); token counts are exposed so callers can derive it.
 - Per-conversation overrides (model, system prompt) beyond the shared session settings.
 - Live pricing fetched from an API (the table is static but config-overridable).
