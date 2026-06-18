@@ -150,7 +150,7 @@ First step: **dependency injection + configuration** (foundation for packaging t
 ### Tool use / function calling
 - `IChatTool` (name, description, JSON-schema `Properties`/`Required`, `ExecuteAsync`) is the consumer-implementable tool contract; `ToolSchema` provides parameter helpers. Tools are registered in DI and injected into the engine.
 - `StreamingChatService` runs the agentic loop: stream text → on `stop_reason == tool_use`, execute each tool and send `tool_result` back → repeat until `end_turn`. Tool failures return an error string instead of crashing; usage is summed across loop iterations.
-- Tool-use/tool-result turns are in-call only; persistence stays text-only. Tool use is streaming-mode only (compaction logs a warning and ignores tools).
+- Tool-use/tool-result turns are in-call only; persistence stays text-only. Both the streaming and compaction engines run the agentic tool loop (the beta compaction call is behind `IBetaCompletionClient` so the loop is unit-tested).
 - Sample tools shipped in Core: `CurrentTimeTool`, `RollDiceTool` (registered by the host).
 
 ### PostgreSQL store (opt-in)
@@ -195,8 +195,18 @@ First step: **dependency injection + configuration** (foundation for packaging t
   `/help`) parsed by the pure, unit-tested `ChatCommandParser`. `--conversation <id>` selects
   the startup conversation for both backends.
 
+## Tool use in compaction mode
+
+- The beta compaction engine now runs the same agentic tool loop as the streaming engine
+  (previously it ignored tools and logged a warning).
+- The beta `Messages.Create` call is abstracted behind `IBetaCompletionClient`
+  (`AnthropicBetaCompletionClient` is the real impl), mirroring `IChatCompletionClient`, so the
+  compaction loop — tool_use → tool_result → end_turn, usage summing, unknown-tool recovery,
+  compaction-block round-tripping — is unit-tested with a scripted fake.
+- `CompactionChatService` builds beta tool definitions from the registered `IChatTool`s and
+  preserves compaction blocks across tool iterations.
+
 ## Out of Scope (future)
 
 - Dollar-cost computation (needs a maintained price table); token counts are exposed so callers can derive it.
-- Tool use within compaction mode.
 - Per-conversation overrides (model, system prompt) beyond the shared session settings.
